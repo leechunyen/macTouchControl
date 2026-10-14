@@ -130,8 +130,8 @@ final class LocalizationManager {
            let lang = AppLanguage(rawValue: saved) {
             self.selectedLanguage = lang
         } else {
-            // UI 預設為 en_us (English (US))
-            self.selectedLanguage = .en_us
+            // 預設語言為 System (跟隨系統)
+            self.selectedLanguage = .system
         }
     }
 
