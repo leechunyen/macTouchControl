@@ -37,7 +37,7 @@ struct MacTouchControlTests {
         #expect(emptyFallback == .en_us)
     }
 
-    @Test("測試動態語系切換字串轉換")
+    @Test("測試動態語系切換與嚴格台灣繁體中文用語")
     @MainActor
     func testLocalizedStrings() {
         let manager = LocalizationManager()
@@ -48,15 +48,20 @@ struct MacTouchControlTests {
         #expect(manager.t(.mappingSectionTitle) == "Touch Panel & Display 1-to-1 Mapping")
         #expect(manager.t(.accessibilityTitle) == "Accessibility")
         #expect(manager.t(.mainDisplayBadge) == "Main")
-        #expect(manager.t(.gestureScrollTitle) == "Mobile / Tablet Touch Scrolling")
+        #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
+        #expect(manager.t(.longPressRightClickTitle) == "Long Press for Right-Click (Windows Style)")
 
-        // 強制切換為繁體中文
+        // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
         manager.selectedLanguage = .zh_tw
         #expect(manager.t(.statusActive) == "服務運作中")
         #expect(manager.t(.mappingSectionTitle) == "觸控面板與螢幕 1 對 1 綁定")
+        #expect(manager.t(.rescanButton) == "重新掃描裝置")
+        #expect(manager.t(.defaultTouchDeviceName) == "觸控裝置")
         #expect(manager.t(.accessibilityTitle) == "輔助使用 (Accessibility)")
         #expect(manager.t(.mainDisplayBadge) == "主螢幕")
-        #expect(manager.t(.gestureScrollTitle) == "觸摸屏滑動體驗 (Mobile/Tablet 模式)")
+        #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
+        #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
+        #expect(manager.t(.longPressRightClickTitle) == "長按觸發右鍵 (如同 Windows 觸控體驗)")
     }
 
     @Test("測試觸控設備座標標準化與邊界約束")
@@ -181,42 +186,47 @@ struct MacTouchControlTests {
         #expect(asusTouch == true)
     }
 
-    @Test("測試平板觸控滑動手勢處理器配置與觸摸循環")
+    @Test("測試平板觸控滑動手勢處理器預設值、雙向捲動與防誤觸點擊")
     @MainActor
     func testTouchGestureHandlerCycle() {
+        // 先清除持久化快取，以驗證乾淨環境下的預設值
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.touchScrollEnabled")
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.naturalScroll")
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.scrollSensitivity")
+
         let handler = TouchGestureHandler()
 
-        // 測試預設值
+        // 需求4：觸摸屏滑動體驗和自然滑動方向必須默認開啟
         #expect(handler.isTouchScrollEnabled == true)
         #expect(handler.naturalScroll == true)
-        #expect(handler.scrollSensitivity > 0)
+        #expect(handler.scrollSensitivity == 1.0)
 
-        // 模擬 Tap (輕點) 循環：在相同位置按下與抬起
         let tapPoint = CGPoint(x: 200, y: 300)
         let norm = CGPoint(x: 0.2, y: 0.3)
 
+        // 模擬正常輕點 Tap（在有效時間與微小位移內快速釋放）
         handler.handleTouch(point: tapPoint, normalized: norm, isDown: true, tipChanged: true)
         handler.handleTouch(point: tapPoint, normalized: norm, isDown: false, tipChanged: true)
 
-        // 模擬 Scroll (滑動) 循環：手指按下並拖動超過 slopThreshold (8pt)
+        // 模擬垂直與水平 2D 滑動循環（支援橫向與上下捲動）
         let scrollStart = CGPoint(x: 300, y: 400)
         handler.handleTouch(point: scrollStart, normalized: norm, isDown: true, tipChanged: true)
 
-        // 移動 50 像素（判定進入滑動狀態）
-        let scrollMove1 = CGPoint(x: 300, y: 450)
+        // 移動水平 (dx = +30) 與垂直 (dy = +40) 像素，超過 4.0 點閥值立即觸發雙向捲動
+        let scrollMove1 = CGPoint(x: 330, y: 440)
         handler.handleTouch(point: scrollMove1, normalized: norm, isDown: true, tipChanged: false)
 
-        let scrollMove2 = CGPoint(x: 300, y: 520)
+        let scrollMove2 = CGPoint(x: 380, y: 500)
         handler.handleTouch(point: scrollMove2, normalized: norm, isDown: true, tipChanged: false)
 
-        // 釋放（結束滑動，可能觸發慣性）
+        // 釋放手勢：由於處於 scrolling 狀態，絕對不會誤觸發左鍵點擊（防誤點擊）
         handler.handleTouch(point: scrollMove2, normalized: norm, isDown: false, tipChanged: true)
 
-        // 模擬再次觸摸（中斷慣性）
-        handler.handleTouch(point: CGPoint(x: 310, y: 530), normalized: norm, isDown: true, tipChanged: true)
-        handler.handleTouch(point: CGPoint(x: 310, y: 530), normalized: norm, isDown: false, tipChanged: true)
+        // 模擬觸碰中斷可能存在的慣性滑行
+        handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: false, tipChanged: true)
 
-        // 測試修改配置
+        // 測試修改配置後，能重設回預設值
         handler.naturalScroll = false
         #expect(handler.naturalScroll == false)
 
@@ -225,5 +235,10 @@ struct MacTouchControlTests {
 
         handler.isTouchScrollEnabled = false
         #expect(handler.isTouchScrollEnabled == false)
+
+        // 測試重設回預設值
+        handler.isTouchScrollEnabled = true
+        handler.naturalScroll = true
+        handler.scrollSensitivity = 1.0
     }
 }

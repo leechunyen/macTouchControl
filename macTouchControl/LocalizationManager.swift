@@ -8,8 +8,8 @@ import Observation
 
 enum AppLanguage: String, CaseIterable, Identifiable {
     case system = "system"
-    case en_us = "en_us"
-    case zh_tw = "zh_tw"
+    case zh_tw = "zh-TW"
+    case en_us = "en-US"
 
     var id: String { rawValue }
 
@@ -17,16 +17,16 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .system:
             return "System Default"
-        case .en_us:
-            return "English (US)"
         case .zh_tw:
             return "繁體中文 (台灣)"
+        case .en_us:
+            return "English (US)"
         }
     }
 }
 
 enum LocKey {
-    // App Bar & General
+    // App Header
     case appName
     case appSubtitle
     case statusActive
@@ -78,6 +78,8 @@ enum LocKey {
     case naturalScrollTitle
     case naturalScrollDesc
     case scrollSensitivityTitle
+    case longPressRightClickTitle
+    case longPressRightClickDesc
     case menuToggleTouchScroll
     case gestureNotificationCenterTitle
     case gestureNotificationCenterDesc
@@ -201,7 +203,7 @@ final class LocalizationManager {
         case .mappingSectionTitle:
             return "觸控面板與螢幕 1 對 1 綁定"
         case .rescanButton:
-            return "重新掃描設備"
+            return "重新掃描裝置"
         case .mirrorModeNotice:
             return "目前螢幕設定為【鏡像模式 (Mirroring)】，所有螢幕共用相同畫面與座標空間。"
         case .noDeviceDetectedTitle:
@@ -209,7 +211,7 @@ final class LocalizationManager {
         case .noDeviceDetectedDesc:
             return "請連接支援 USB / 藍牙 HID 規範的觸控螢幕（如 ASUS ZenScreen、ViewSonic TD、Dell 觸控螢幕等），系統將會自動列出並供您綁定螢幕。"
         case .touchSignalActive:
-            return "觸控訊號活躍中"
+            return "觸控訊號作用中"
         case .mappedDisplayLabel:
             return "對應綁定的顯示器："
         case .testWarpButton:
@@ -236,26 +238,30 @@ final class LocalizationManager {
         case .origin(let x, let y):
             return "原點: (\(x), \(y))"
         case .mappedDeviceList(let list):
-            return "已綁定: \(list)"
+            return "已綁定裝置: \(list)"
 
         case .gesturesSectionTitle:
-            return "觸控手勢與滑動 (Touch Gestures)"
+            return "觸控手勢與捲動體驗 (Touch Gestures)"
         case .nextPhaseBadge:
             return "已啟用"
         case .comingSoonBadge:
             return "即將推出"
         case .gestureScrollTitle:
-            return "觸摸屏滑動體驗 (Mobile/Tablet 模式)"
+            return "觸控螢幕雙向捲動 (平板 / 手機模式)"
         case .gestureScrollDesc:
-            return "如同手機或平板直接在螢幕上滑動網頁與列表，支援慣性滾動與輕點點擊"
+            return "如同平板直接在螢幕上滑動捲動網頁與視窗內容，完整支援上下與水平橫向捲動、慣性滑行與防誤觸輕點"
         case .naturalScrollTitle:
-            return "自然滑動方向 (Natural Scrolling)"
+            return "自然捲動方向 (Natural Scrolling)"
         case .naturalScrollDesc:
-            return "內容直接跟隨手指滑動方向移動（Direct Manipulation）"
+            return "畫面內容直接跟隨手指滑動方向位移（預設開啟）"
         case .scrollSensitivityTitle:
-            return "滑動靈敏度"
+            return "捲動靈敏度"
+        case .longPressRightClickTitle:
+            return "長按觸發右鍵 (如同 Windows 觸控體驗)"
+        case .longPressRightClickDesc:
+            return "手指在螢幕定點長按約 0.45 秒立即呼叫右鍵捷徑選單，抬起手指不會誤觸左鍵"
         case .menuToggleTouchScroll:
-            return "平板觸控滑動模式"
+            return "觸控螢幕滑動捲動模式"
         case .gestureNotificationCenterTitle:
             return "右緣向內滑動開通知中心"
         case .gestureNotificationCenterDesc:
@@ -263,24 +269,24 @@ final class LocalizationManager {
         case .gestureDockTitle:
             return "底緣向內滑動顯示 Dock"
         case .gestureDockDesc:
-            return "從觸控螢幕底部往上滑動，快速喚出 macOS Dock 工作列"
+            return "從觸控螢幕底端往上輕滑，快速喚出 macOS Dock 工具列"
 
         case .menuStatusActive:
-            return "● macTouchControl: 正常運作中"
+            return "● macTouchControl: 服務運作中"
         case .menuStatusNeedPermission:
             return "▲ macTouchControl: 尚未取得必要權限"
         case .menuNoDevices:
-            return "尚未偵測到外接觸控設備"
+            return "尚未偵測到外接觸控裝置"
         case .menuOpenPanel:
             return "開啟控制面板..."
         case .menuRescan:
-            return "重新掃描設備"
+            return "重新掃描裝置"
         case .menuRevealFinder:
             return "在 Finder 中顯示 App (拖曳授權)"
         case .menuQuit:
-            return "離開 macTouchControl"
+            return "結束 macTouchControl"
         case .menuLanguageTitle:
-            return "語言"
+            return "語言 (Language)"
 
         case .defaultTouchDeviceName:
             return "觸控裝置"
@@ -321,28 +327,28 @@ final class LocalizationManager {
         case .permissionRequestButton:
             return "Grant Access"
         case .dragHelperTitle:
-            return "Trouble granting permissions or no prompt appeared?"
+            return "Cannot grant or dialog didn't show?"
         case .dragHelperDesc:
-            return "Click the button to reveal this app in Finder, then drag and drop it into System Settings > Accessibility or Input Monitoring."
+            return "Click the button on the right to reveal this App in Finder. You can directly drag it into the Accessibility or Input Monitoring list in System Settings to complete authorization."
         case .revealInFinderButton:
-            return "Reveal App in Finder"
+            return "Reveal in Finder"
 
         case .mappingSectionTitle:
             return "Touch Panel & Display 1-to-1 Mapping"
         case .rescanButton:
             return "Rescan Devices"
         case .mirrorModeNotice:
-            return "Displays are currently in Mirroring mode, sharing the same screen and coordinate space."
+            return "Currently in Mirroring Mode. All displays share the same desktop and coordinate space."
         case .noDeviceDetectedTitle:
-            return "No external touch screen or digitizer detected"
+            return "No External Touch Monitors Detected"
         case .noDeviceDetectedDesc:
-            return "Please connect a USB/Bluetooth HID-compliant touch monitor (e.g. ASUS ZenScreen, ViewSonic TD, Dell touch monitors). It will automatically appear here for mapping."
+            return "Please connect an external touch monitor supporting standard USB/Bluetooth HID (e.g. ASUS ZenScreen, ViewSonic TD, Dell Touch). It will automatically appear here."
         case .touchSignalActive:
-            return "Touch Active"
+            return "Touch Signal Active"
         case .mappedDisplayLabel:
             return "Mapped Display:"
         case .testWarpButton:
-            return "Test Warp Cursor"
+            return "Test Warp"
         case .liveCoordinates(let x, let y):
             return "Live Cursor: X: \(x), Y: \(y)"
         case .panelRatio(let x, let y):
@@ -365,7 +371,7 @@ final class LocalizationManager {
         case .origin(let x, let y):
             return "Origin: (\(x), \(y))"
         case .mappedDeviceList(let list):
-            return "Mapped: \(list)"
+            return "Mapped Devices: \(list)"
 
         case .gesturesSectionTitle:
             return "Touch Gestures & Scrolling"
@@ -374,38 +380,42 @@ final class LocalizationManager {
         case .comingSoonBadge:
             return "Coming Soon"
         case .gestureScrollTitle:
-            return "Mobile / Tablet Touch Scrolling"
+            return "Touchscreen 2D Scrolling (Tablet Mode)"
         case .gestureScrollDesc:
-            return "Swipe directly on touchscreen to scroll web pages and lists like an iPad, with momentum and tap-to-click"
+            return "Direct touchscreen scrolling like a tablet, supporting both vertical and horizontal directions, natural scroll, momentum fling, and tap anti-misclick"
         case .naturalScrollTitle:
             return "Natural Scroll Direction"
         case .naturalScrollDesc:
-            return "Content directly follows finger movement (Direct Manipulation)"
+            return "Content moves in the exact direction your finger slides (Enabled by default)"
         case .scrollSensitivityTitle:
             return "Scroll Sensitivity"
+        case .longPressRightClickTitle:
+            return "Long Press for Right-Click (Windows Style)"
+        case .longPressRightClickDesc:
+            return "Touch and hold for ~0.45s to invoke context menu, release without accidental click"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .gestureNotificationCenterTitle:
             return "Swipe In from Right for Notification Center"
         case .gestureNotificationCenterDesc:
-            return "Swipe inward from the right edge of the touch panel to open macOS Notification Center."
+            return "Swipe inward from the right edge of the touch monitor to open Notification Center."
         case .gestureDockTitle:
-            return "Swipe Up from Bottom to Show Dock"
+            return "Swipe Up from Bottom for Dock"
         case .gestureDockDesc:
-            return "Swipe inward from the bottom edge to quickly reveal the macOS Dock."
+            return "Swipe upward from the bottom edge to reveal the macOS Dock."
 
         case .menuStatusActive:
             return "● macTouchControl: Active"
         case .menuStatusNeedPermission:
-            return "▲ macTouchControl: Permissions Missing"
+            return "▲ macTouchControl: Permissions Needed"
         case .menuNoDevices:
-            return "No Touch Devices Detected"
+            return "No External Touch Devices Detected"
         case .menuOpenPanel:
-            return "Open Control Panel..."
+            return "Open Preferences..."
         case .menuRescan:
             return "Rescan Devices"
         case .menuRevealFinder:
-            return "Reveal App in Finder (Drag to Authorize)"
+            return "Reveal in Finder (Drag to Authorize)"
         case .menuQuit:
             return "Quit macTouchControl"
         case .menuLanguageTitle:
@@ -416,7 +426,7 @@ final class LocalizationManager {
         case .unassignedDisplay:
             return "Unassigned Display"
         case .windowTitle:
-            return "macTouchControl Control Panel"
+            return "macTouchControl Preferences"
         }
     }
 }

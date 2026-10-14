@@ -416,7 +416,7 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
 
-                        // 顯示綁定到此螢幕的觸控設備
+                        // 顯示綁定到此螢幕的觸控裝置
                         let mappedDevices = touchManager.devices.values.filter { dev in
                             mappingStore.targetDisplay(for: dev.id, availableDisplays: displayManager.displays)?.id == display.id
                         }
@@ -477,7 +477,7 @@ struct ContentView: View {
 
             if isGesturesSectionExpanded {
                 VStack(spacing: 12) {
-                    // 1. Tablet 風格滑動開關（已完成功能）
+                    // 1. Tablet 風格雙向滑動開關（已完成功能）
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .center) {
                             Image(systemName: "hand.draw")
@@ -555,7 +555,39 @@ struct ContentView: View {
 
                     Divider()
 
-                    // 2. 右側邊緣向內滑開通知中心（即將推出）
+                    // 2. Windows 風格長按觸發右鍵（已完成功能）
+                    HStack(alignment: .center) {
+                        Image(systemName: "cursorarrow.click.2")
+                            .font(.system(size: 20))
+                            .foregroundColor(.accentColor)
+                            .frame(width: 24)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(loc.t(.longPressRightClickTitle))
+                                .font(.body)
+                                .fontWeight(.medium)
+                            Text(loc.t(.longPressRightClickDesc))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text(loc.t(.nextPhaseBadge))
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundColor(.green)
+                            .cornerRadius(6)
+                    }
+                    .padding(12)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+
+                    Divider()
+
+                    // 3. 右側邊緣向內滑開通知中心（即將推出）
                     gesturePreviewRow(
                         title: loc.t(.gestureNotificationCenterTitle),
                         description: loc.t(.gestureNotificationCenterDesc),
@@ -565,7 +597,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    // 3. 底部邊緣向內滑顯示 Dock（即將推出）
+                    // 4. 底部邊緣向內滑顯示 Dock（即將推出）
                     gesturePreviewRow(
                         title: loc.t(.gestureDockTitle),
                         description: loc.t(.gestureDockDesc),

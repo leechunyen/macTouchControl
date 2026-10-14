@@ -89,7 +89,7 @@ final class TouchDeviceManager: @unchecked Sendable {
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.hidManager = nil
         self.isRunning = false
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             self.devices.removeAll()
             self.deviceStates.removeAll()
         }
@@ -219,7 +219,7 @@ final class TouchDeviceManager: @unchecked Sendable {
             maxY: maxY
         )
 
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             self.devices[id] = touchDevice
             self.deviceStates[id] = DeviceInputState()
 
@@ -238,7 +238,7 @@ final class TouchDeviceManager: @unchecked Sendable {
 
     private func handleDeviceRemoved(_ device: IOHIDDevice) {
         let id = deviceID(for: device)
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             self.devices.removeValue(forKey: id)
             self.deviceStates.removeValue(forKey: id)
             if self.lastActiveDeviceID == id {
@@ -247,7 +247,7 @@ final class TouchDeviceManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Input Value Handling
+    // MARK: - Input Value Handling (零延遲即時同步處理)
 
     private func handleInputValue(_ value: IOHIDValue) {
         let element = IOHIDValueGetElement(value)
@@ -292,63 +292,68 @@ final class TouchDeviceManager: @unchecked Sendable {
 
         guard coordinateUpdated || tipChanged else { return }
 
-        // 取得該觸控裝置綁定的目標螢幕
-        Task { @MainActor in
-            guard let touchDevice = self.devices[id] else { return }
+        // 同步在主執行緒立即處理觸控事件，杜絕 Task 異步隊列造成的延遲跟手問題
+        MainActor.assumeIsolated {
+            self.processTouchInput(id: id, state: state, tipChanged: tipChanged)
+        }
+    }
 
-            let displayManager = DisplayManager.shared
-            let mappingStore = MappingStore.shared
+    @MainActor
+    private func processTouchInput(id: String, state: DeviceInputState, tipChanged: Bool) {
+        guard let touchDevice = self.devices[id] else { return }
 
-            // 計算標準化座標 (0.0 ... 1.0)
-            let normPoint = touchDevice.normalizedCoordinate(rawX: state.rawX, rawY: state.rawY)
+        let displayManager = DisplayManager.shared
+        let mappingStore = MappingStore.shared
 
-            // 尋找綁定的目標螢幕（若鏡像中或未自訂則使用主螢幕）
-            let targetDisplay: DisplayInfo?
-            if displayManager.isMirroringActive {
-                targetDisplay = displayManager.mainDisplay
-            } else {
-                targetDisplay = mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays) ?? displayManager.mainDisplay
-            }
+        // 計算標準化座標 (0.0 ... 1.0)
+        let normPoint = touchDevice.normalizedCoordinate(rawX: state.rawX, rawY: state.rawY)
 
-            guard let display = targetDisplay else { return }
+        // 尋找綁定的目標螢幕（若鏡像中或未自訂則使用主螢幕）
+        let targetDisplay: DisplayInfo?
+        if displayManager.isMirroringActive {
+            targetDisplay = displayManager.mainDisplay
+        } else {
+            targetDisplay = mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays) ?? displayManager.mainDisplay
+        }
 
-            // 映射至目標螢幕的全域 CoreGraphics 座標
-            let targetBounds = display.bounds
-            let screenX = targetBounds.origin.x + normPoint.x * targetBounds.width
-            let screenY = targetBounds.origin.y + normPoint.y * targetBounds.height
-            let targetPoint = CGPoint(x: screenX, y: screenY)
+        guard let display = targetDisplay else { return }
 
-            // 核心功能：游標立馬跳轉至對應螢幕
-            CGWarpMouseCursorPosition(targetPoint)
+        // 映射至目標螢幕的全域 CoreGraphics 座標
+        let targetBounds = display.bounds
+        let screenX = targetBounds.origin.x + normPoint.x * targetBounds.width
+        let screenY = targetBounds.origin.y + normPoint.y * targetBounds.height
+        let targetPoint = CGPoint(x: screenX, y: screenY)
 
-            // 更新即時狀態指示
-            self.lastActiveDeviceID = id
-            self.lastTouchPoint = targetPoint
-            self.lastNormalizedPoint = normPoint
-            self.devices[id]?.currentRawX = state.rawX
-            self.devices[id]?.currentRawY = state.rawY
-            self.devices[id]?.isTouching = state.isDown
-            self.devices[id]?.lastActiveTime = Date()
+        // 核心功能：游標立馬無延遲跳轉至對應螢幕
+        CGWarpMouseCursorPosition(targetPoint)
 
-            // 交付手勢與觸控事件引擎（支援 Mobile/Tablet 觸摸屏滑動、輕點與慣性滾動體驗）
-            self.gestureHandler.handleTouch(
-                point: targetPoint,
-                normalized: normPoint,
-                isDown: state.isDown,
-                tipChanged: tipChanged
+        // 更新即時狀態指示
+        self.lastActiveDeviceID = id
+        self.lastTouchPoint = targetPoint
+        self.lastNormalizedPoint = normPoint
+        self.devices[id]?.currentRawX = state.rawX
+        self.devices[id]?.currentRawY = state.rawY
+        self.devices[id]?.isTouching = state.isDown
+        self.devices[id]?.lastActiveTime = Date()
+
+        // 交付手勢與觸控事件引擎（支援平板滑動、防誤觸輕點、Windows 風格長按右鍵與 2D 慣性）
+        self.gestureHandler.handleTouch(
+            point: targetPoint,
+            normalized: normPoint,
+            isDown: state.isDown,
+            tipChanged: tipChanged
+        )
+
+        // 若裝置支援近距懸停（未觸碰且未改變狀態），發送 MouseMoved
+        if !state.isDown && !tipChanged {
+            guard PermissionManager.shared.isAccessibilityGranted else { return }
+            let event = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .mouseMoved,
+                mouseCursorPosition: targetPoint,
+                mouseButton: .left
             )
-
-            // 若設備支援近距懸停（未觸碰且未改變狀態），發送 MouseMoved
-            if !state.isDown && !tipChanged {
-                guard PermissionManager.shared.isAccessibilityGranted else { return }
-                let event = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: .mouseMoved,
-                    mouseCursorPosition: targetPoint,
-                    mouseButton: .left
-                )
-                event?.post(tap: .cghidEventTap)
-            }
+            event?.post(tap: .cghidEventTap)
         }
     }
 }
