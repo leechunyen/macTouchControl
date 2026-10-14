@@ -188,7 +188,7 @@ struct MacTouchControlTests {
         #expect(asusTouch == true)
     }
 
-    @Test("測試平板觸控滑動手勢處理器預設值、雙向捲動、長按右鍵開關與防誤觸")
+    @Test("測試平板觸控滑動手勢處理器預設值、雙向跟手、換向即刻反應與Click鎖定")
     @MainActor
     func testTouchGestureHandlerCycle() {
         // 先清除持久化快取，以驗證乾淨環境下的預設值
@@ -217,27 +217,34 @@ struct MacTouchControlTests {
         let tapPoint = CGPoint(x: 200, y: 300)
         let norm = CGPoint(x: 0.2, y: 0.3)
 
-        // 模擬正常輕點 Tap（在有效時間與微小位移內快速釋放）
+        // 模擬正常輕點 Tap（在非捲動冷卻期間快速點擊釋放）
         handler.handleTouch(point: tapPoint, normalized: norm, isDown: true, tipChanged: true)
         handler.handleTouch(point: tapPoint, normalized: norm, isDown: false, tipChanged: true)
 
-        // 模擬垂直與水平 2D 滑動循環（支援橫向與上下捲動）
+        // 模擬極致跟手的滑動循環（支援橫向與上下捲動）
         let scrollStart = CGPoint(x: 300, y: 400)
         handler.handleTouch(point: scrollStart, normalized: norm, isDown: true, tipChanged: true)
 
-        // 移動水平 (dx = +30) 與垂直 (dy = +40) 像素，超過 6.0 點閥值立即觸發雙向捲動
+        // 移動超過 3.5 點閥值立即觸發雙向跟手捲動，並進入 Click 鎖定
         let scrollMove1 = CGPoint(x: 330, y: 440)
         handler.handleTouch(point: scrollMove1, normalized: norm, isDown: true, tipChanged: false)
+        #expect(handler.hasScrolledInCurrentGesture == true)
+        #expect(handler.isScrollSessionActive == true)
 
-        let scrollMove2 = CGPoint(x: 380, y: 500)
-        handler.handleTouch(point: scrollMove2, normalized: norm, isDown: true, tipChanged: false)
+        // 測試突然急遽反轉換向：從 (+30, +40) 突然往反方向 (-50, -60) 移動
+        let reverseMove = CGPoint(x: 280, y: 380)
+        handler.handleTouch(point: reverseMove, normalized: norm, isDown: true, tipChanged: false)
+        #expect(handler.hasScrolledInCurrentGesture == true)
 
-        // 釋放手勢：由於處於 scrolling 狀態，絕對不會誤觸發左鍵點擊（防誤點擊）
-        handler.handleTouch(point: scrollMove2, normalized: norm, isDown: false, tipChanged: true)
+        // 釋放手勢：由於處於 scrolling 狀態，絕對鎖死 Click，不觸發任何誤點擊
+        handler.handleTouch(point: reverseMove, normalized: norm, isDown: false, tipChanged: true)
+        #expect(handler.isScrollSessionActive == true)
 
-        // 模擬觸碰中斷可能存在的慣性滑行（煞車碰觸），抬起時絕不觸發誤點擊
-        handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: true, tipChanged: true)
-        handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: false, tipChanged: true)
+        // 測試在捲動工作階段內（滑動剛結束 400ms 內）的碰觸煞車與防誤點擊：
+        // 觸碰落指並迅速抬起，因處於 isScrollSessionActive，Click 依然處於鎖定保護狀態
+        let brakePoint = CGPoint(x: 280, y: 380)
+        handler.handleTouch(point: brakePoint, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: brakePoint, normalized: norm, isDown: false, tipChanged: true)
 
         // 測試修改配置後，能重設回預設值
         handler.naturalScroll = false

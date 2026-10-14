@@ -3,14 +3,15 @@
 //  macTouchControl
 //
 
-import SwiftUI
-import AppKit
-import CoreGraphics
+import Foundation
+import IOKit
 import IOKit.hid
-import Observation
+import CoreGraphics
+import AppKit
 
 @Observable
-final class TouchDeviceManager: @unchecked Sendable {
+@MainActor
+final class TouchDeviceManager {
     static let shared = TouchDeviceManager()
 
     var devices: [String: TouchDevice] = [:]
@@ -22,21 +23,18 @@ final class TouchDeviceManager: @unchecked Sendable {
     private var hidManager: IOHIDManager?
     private let gestureHandler = TouchGestureHandler.shared
 
-    // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫
+    // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫，並支援 X/Y 封包原子性合併
     private var deviceStates: [String: DeviceInputState] = [:]
 
     private struct DeviceInputState {
         var rawX: Double = 0
         var rawY: Double = 0
         var isDown: Bool = false
+        var pendingXUpdate: Bool = false
     }
 
     init() {
         start()
-    }
-
-    deinit {
-        stop()
     }
 
     func start() {
@@ -45,7 +43,7 @@ final class TouchDeviceManager: @unchecked Sendable {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         self.hidManager = manager
 
-        // 配對所有 Digitizer (觸控螢幕、數位板、觸控板) 及 Pointer 裝置
+        // 匹配外部觸控螢幕、數位板 (Digitizer) 與觸控筆
         let matchingCriteria: [[String: Any]] = [
             [kIOHIDDeviceUsagePageKey as String: kHIDPage_Digitizer],
             [
@@ -103,7 +101,7 @@ final class TouchDeviceManager: @unchecked Sendable {
     // MARK: - Device Filtering
 
     /// 判斷裝置是否為可調用與綁定的外接觸控螢幕／數位板，排除 Mac 內建鍵盤觸控板與常規輸入設備
-    static func isEligibleTouchDevice(name: String, manufacturer: String, vendorID: Int, isBuiltIn: Bool) -> Bool {
+    nonisolated static func isEligibleTouchDevice(name: String, manufacturer: String, vendorID: Int, isBuiltIn: Bool) -> Bool {
         // 1. 內建硬體一律排除
         if isBuiltIn {
             return false
@@ -247,7 +245,7 @@ final class TouchDeviceManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Input Value Handling (零延遲即時同步處理)
+    // MARK: - Input Value Handling (封包合併與零延遲跟手架構)
 
     private func handleInputValue(_ value: IOHIDValue) {
         let element = IOHIDValueGetElement(value)
@@ -265,9 +263,25 @@ final class TouchDeviceManager: @unchecked Sendable {
         if page == kHIDPage_GenericDesktop {
             if usage == kHIDUsage_GD_X {
                 state.rawX = Double(intVal)
-                coordinateUpdated = true
+                state.pendingXUpdate = true
+                deviceStates[id] = state
+
+                // 若單獨只有 X 更新（純水平滑動或 Y 軸落後），在當前 RunLoop 週期結束時保底派發，確保零幀延遲
+                CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) { [weak self] in
+                    guard let self else { return }
+                    MainActor.assumeIsolated {
+                        var curState = self.deviceStates[id] ?? state
+                        if curState.pendingXUpdate {
+                            curState.pendingXUpdate = false
+                            self.deviceStates[id] = curState
+                            self.processTouchInput(id: id, state: curState, tipChanged: false)
+                        }
+                    }
+                }
+                return
             } else if usage == kHIDUsage_GD_Y {
                 state.rawY = Double(intVal)
+                state.pendingXUpdate = false // Y 軸到達，直接合併 X 與 Y 立即觸發，杜絕拆包橫縱分離
                 coordinateUpdated = true
             }
         } else if page == kHIDPage_Digitizer {

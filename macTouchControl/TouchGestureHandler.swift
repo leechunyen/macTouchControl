@@ -9,15 +9,15 @@ import Foundation
 import CoreGraphics
 import AppKit
 
-/// 平板風格觸控手勢處理引擎
-/// 核心設計：
-/// 1. 零延遲跟手：即時雙向捲動 (wheel1 垂直, wheel2 水平)，無佇列延遲
-/// 2. 嚴密防誤點擊與防誤反白 (Anti-Misclick & Anti-Highlight)：
-///    - 捲動開始時強制發送 leftMouseUp 阻斷任何拖曳反白選取文字
-///    - 點擊事件 (synthesizeClick) 採原子性同步發送，固定 clickState = 1，絕不觸發雙擊/三擊文字反白
-///    - 慣性捲動中落指煞車中斷後，抬手絕對不觸發誤點擊
-/// 3. Windows 風格長按觸發右鍵：按住約 0.45 秒觸發快捷選單，預設開啟且使用者可自由關閉
-/// 4. 2D 物理慣性滑行模擬器 (帶摩擦力衰減)
+/// 外接觸控螢幕專用觸控手勢處理引擎
+/// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
+/// 2. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
+/// 3. 滑動三重防誤觸鎖定（Click Lock Engine）：
+///    - 手勢一旦進入滑動（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click
+///    - 捲動活躍工作階段（isScrollSessionActive，滑動後 400ms 內），所有落指與抬起一律鎖定 Click，杜絕煞車或連滑誤開連結
+///    - 捲動開始前強制發送 leftMouseUp（Anti-Highlight），徹底阻斷文字反白拖曳
+/// 4. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，可自由切換）
+/// 5. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
 @Observable
 @MainActor
 final class TouchGestureHandler {
@@ -39,14 +39,14 @@ final class TouchGestureHandler {
         }
     }
 
-    /// 滑動靈敏度
+    /// 滑動靈敏度倍率
     var scrollSensitivity: Double = 1.0 {
         didSet {
             UserDefaults.standard.set(scrollSensitivity, forKey: "macTouchControl.scrollSensitivity")
         }
     }
 
-    /// 長按定點觸發右鍵選單（如同 Windows 體驗，預設開啟，使用者可自由選擇關閉）
+    /// 是否啟用 Windows 風格定點長按觸發右鍵（預設開啟）
     var isLongPressRightClickEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isLongPressRightClickEnabled, forKey: "macTouchControl.longPressRightClickEnabled")
@@ -70,19 +70,41 @@ final class TouchGestureHandler {
     private var gestureState: GestureState = .idle
     private var longPressTimer: Timer?
 
-    // MARK: - Precision Thresholds (防誤觸與零延遲跟手參數)
+    // MARK: - Precision Thresholds & Click Lock Engine
 
-    /// 滑動識別閥值：手指移動超過 6.0 點即判定為滑動，精確區隔定點輕點與滑動
-    private let slopThreshold: CGFloat = 6.0
+    /// 本次手勢是否已進入過捲動狀態。一旦捲動過，本次手勢結束時絕對鎖死 Click，嚴禁任何點擊
+    private(set) var hasScrolledInCurrentGesture: Bool = false
 
-    /// 長按右鍵閥值：長按 0.45 秒觸發右鍵（如同 Windows / Surface 觸控體驗）
+    /// 上次捲動發生的時間戳（包含連續手勢捲動與慣性捲動）
+    private(set) var lastScrollTimestamp: TimeInterval = 0
+
+    /// 捲動冷卻鎖定視窗（400ms）：在捲動發生後的 400ms 內，點擊判定全面鎖定，所有落指抬起均視為捲動煞車或換向調整，絕不誤觸點擊
+    private let scrollClickLockDuration: TimeInterval = 0.40
+
+    /// 是否處於捲動活躍工作階段（此時點擊被完全鎖定）
+    var isScrollSessionActive: Bool {
+        ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
+    }
+
+    /// 冷啟動時的滑動門檻 (3.5pt，極致跟手，杜絕卡頓感)
+    private let initialSlopThreshold: CGFloat = 3.5
+
+    /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (1.0pt，手指一動即刻雙向反應，零遲滯)
+    private let activeSessionSlopThreshold: CGFloat = 1.0
+
+    /// 取得目前手勢應採用的滑動門檻
+    private var currentSlopThreshold: CGFloat {
+        isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
+    }
+
+    /// 長按右鍵門檻：長按 0.45 秒觸發右鍵（如同 Windows / Surface 觸控體驗）
     private let longPressThreshold: TimeInterval = 0.45
 
     /// 有效輕點最短時間 (40ms)，過濾硬體電容抖動造成的幽靈誤點擊
     private let minTapDuration: TimeInterval = 0.04
 
-    /// 有效輕點最長時間 (220ms)，超過此時間未滑動亦不判定為誤點擊
-    private let maxTapDuration: TimeInterval = 0.22
+    /// 有效輕點最長時間 (200ms)，超過此時間未滑動亦不判定為誤點擊
+    private let maxTapDuration: TimeInterval = 0.20
 
     /// 慣性摩擦衰減係數
     private let friction: Double = 0.94
@@ -97,7 +119,6 @@ final class TouchGestureHandler {
     private var momentumTimer: Timer?
     private var momentumVx: Double = 0
     private var momentumVy: Double = 0
-    private var wasMomentumActiveOnTouchDown: Bool = false
 
     // 次像素累加器（垂直與水平）
     private var fractionalRemainderX: CGFloat = 0
@@ -144,12 +165,13 @@ final class TouchGestureHandler {
     // MARK: - Private Gesture Handlers
 
     private func handleTouchDown(point: CGPoint, normalized: CGPoint, timestamp: TimeInterval) {
-        wasMomentumActiveOnTouchDown = false
-
-        // 一碰即停：立即中斷進行中的慣性捲動
-        stopMomentum()
-
         cancelLongPressTimer()
+
+        // 檢查是否處於慣性滑行中
+        let wasMomentumActive = (momentumTimer != nil)
+        stopMomentum() // 發送 phase: .ended 確保系統即刻煞車，不與後續反向滑動衝突
+
+        hasScrolledInCurrentGesture = false
         fractionalRemainderX = 0
         fractionalRemainderY = 0
 
@@ -159,12 +181,14 @@ final class TouchGestureHandler {
             return
         }
 
-        // 若前次處於慣性滑行中，本次落指僅作「煞車／停下畫面」用途，絕對不觸發後續誤點擊
-        if wasMomentumActiveOnTouchDown {
-            wasMomentumActiveOnTouchDown = false
+        // 若前次處於慣性滑行中，本次落指立即發揮煞車作用，同時具備一觸即發的換向反應能力
+        if wasMomentumActive {
+            lastScrollTimestamp = timestamp
             gestureState = .stoppingMomentum(point: point)
             return
         }
+
+        let inActiveSession = isScrollSessionActive
 
         gestureState = .pending(
             startPoint: point,
@@ -173,12 +197,12 @@ final class TouchGestureHandler {
             maxDisplacement: 0
         )
 
-        // Windows 觸控風格：長按定點約 0.45 秒觸發右鍵選單（需設定開啟）
-        if isLongPressRightClickEnabled {
+        // 僅在非連續捲動冷卻時才排程長按右鍵，避免連續滑動閱覽時誤觸發右鍵選單
+        if isLongPressRightClickEnabled && !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
                 if case .pending(let startPoint, _, _, let maxDisp) = self.gestureState {
-                    if maxDisp < self.slopThreshold {
+                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
                         self.gestureState = .longPressTriggered(point: startPoint)
                         self.synthesizeRightClick(at: startPoint)
                     }
@@ -202,7 +226,12 @@ final class TouchGestureHandler {
         case .stoppingMomentum(let startPt):
             let dx = point.x - startPt.x
             let dy = point.y - startPt.y
-            if hypot(dx, dy) >= slopThreshold {
+            let dist = hypot(dx, dy)
+
+            // 碰觸煞車後，手指只要微幅移動超過 1.0pt（無遲滯），立刻開始換向滑動
+            if dist >= activeSessionSlopThreshold {
+                hasScrolledInCurrentGesture = true
+                lastScrollTimestamp = timestamp
                 cancelAnyMouseDrag(at: point)
                 gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
                 postScrollEvent(deltaX: dx, deltaY: dy, phase: .began)
@@ -213,17 +242,20 @@ final class TouchGestureHandler {
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
             let updatedMaxDisp = max(maxDisp, distance)
+            let threshold = currentSlopThreshold
 
-            if distance >= slopThreshold {
-                // 超過防誤觸容許位移，立即無延遲切入滑動捲動模式
+            if distance >= threshold {
+                // 超過滑動門檻，立即無延遲切入滑動模式，並鎖死點擊
                 cancelLongPressTimer()
+                hasScrolledInCurrentGesture = true
+                lastScrollTimestamp = timestamp
 
                 // 重要：在發送任何捲動事件之前，確保滑鼠左鍵已強制釋放，徹底阻斷滑鼠拖曳文字反白 (Anti-Highlight)
                 cancelAnyMouseDrag(at: point)
 
                 gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
 
-                // 立即發送捲動開始事件（同時包含垂直與水平位移）
+                // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
                 postScrollEvent(deltaX: dx, deltaY: dy, phase: .began)
             } else {
                 gestureState = .pending(
@@ -237,6 +269,20 @@ final class TouchGestureHandler {
         case .scrolling(let lastPoint, var velocityTracker):
             let dx = point.x - lastPoint.x
             let dy = point.y - lastPoint.y
+
+            hasScrolledInCurrentGesture = true
+            lastScrollTimestamp = timestamp
+
+            // 【換向即刻反應邏輯】：
+            // 若手指移動方向突然反轉，立即截斷速度追蹤器中的舊反向樣本，杜絕慣性反拉
+            if let lastSample = velocityTracker.last {
+                let prevDx = point.x - lastSample.1.x
+                let prevDy = point.y - lastSample.1.y
+                if (dy > 0 && prevDy < -0.5) || (dy < 0 && prevDy > 0.5) ||
+                   (dx > 0 && prevDx < -0.5) || (dx < 0 && prevDx > 0.5) {
+                    velocityTracker.removeAll()
+                }
+            }
 
             velocityTracker.append((timestamp, point))
             // 保留最近 120ms 採樣點以計算精確釋放速度
@@ -267,22 +313,31 @@ final class TouchGestureHandler {
 
         case .stoppingMomentum:
             gestureState = .idle
-            // 碰觸純粹作為煞車中斷慣性滑行，手指抬起時絕對不觸發點擊
+            lastScrollTimestamp = timestamp
+            // 煞車手勢抬起，絕對不觸發任何點擊
 
         case .pending(let startPoint, _, let startTime, let maxDisp):
             gestureState = .idle
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
 
-            // 防止誤點擊判定：
-            // 1. 接觸時長必須在有效點擊範圍內 (40ms ~ 220ms)
-            // 2. 移動距離與全程最大位移皆未曾突破門檻 (slopThreshold)
-            if elapsed >= minTapDuration && elapsed <= maxTapDuration && liftDist < slopThreshold && maxDisp < slopThreshold {
+            // 【極致三重防誤觸鎖定 Click】：
+            // 1. 若手勢曾進入捲動狀態（hasScrolledInCurrentGesture == true），絕對鎖死點擊
+            // 2. 若處於捲動活躍工作階段（isScrollSessionActive == true，400ms 內曾滑動），絕對鎖死點擊
+            // 3. 接觸時長與位移必須在極為嚴格的點擊範圍內（40ms ~ 200ms，位移 < initialSlopThreshold）
+            if !hasScrolledInCurrentGesture &&
+               !isScrollSessionActive &&
+               elapsed >= minTapDuration &&
+               elapsed <= maxTapDuration &&
+               liftDist < initialSlopThreshold &&
+               maxDisp < initialSlopThreshold {
                 synthesizeClick(at: startPoint)
             }
 
         case .scrolling(_, let velocityTracker):
             gestureState = .idle
+            lastScrollTimestamp = timestamp
+
             // 結束手勢滑動
             postScrollEvent(deltaX: 0, deltaY: 0, phase: .ended)
 
@@ -340,7 +395,6 @@ final class TouchGestureHandler {
         let speed = hypot(momentumVx, momentumVy)
         if speed < stopMomentumVelocity {
             stopMomentum()
-            postMomentumScrollEvent(deltaX: 0, deltaY: 0, phase: .ended)
             return
         }
 
@@ -348,18 +402,20 @@ final class TouchGestureHandler {
         let stepY = Int32(momentumVy * 0.016)
 
         if stepX != 0 || stepY != 0 {
+            lastScrollTimestamp = ProcessInfo.processInfo.systemUptime
             postMomentumScrollEvent(deltaX: stepX, deltaY: stepY, phase: .changed)
         }
     }
 
     private func stopMomentum() {
         if momentumTimer != nil {
-            wasMomentumActiveOnTouchDown = true
             momentumTimer?.invalidate()
             momentumTimer = nil
             momentumVx = 0
             momentumVy = 0
-            postMomentumScrollEvent(deltaX: 0, deltaY: 0, phase: .cancelled)
+            lastScrollTimestamp = ProcessInfo.processInfo.systemUptime
+            // 發送 phase: .ended 立即通知 macOS 系統終止慣性滑行，不延遲後續反向滑動
+            postMomentumScrollEvent(deltaX: 0, deltaY: 0, phase: .ended)
         }
     }
 
@@ -368,6 +424,14 @@ final class TouchGestureHandler {
     /// 發送雙向捲動事件：wheel1 為垂直 (Y)，wheel2 為水平 (X)
     private func postScrollEvent(deltaX: CGFloat, deltaY: CGFloat, phase: NSEvent.Phase) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
+
+        // 【換向即刻反應】：若移動方向與殘存的次像素方向相反，立即歸零殘存次像素，防止舊方向抵消反向位移
+        if (deltaY > 0 && fractionalRemainderY < 0) || (deltaY < 0 && fractionalRemainderY > 0) {
+            fractionalRemainderY = 0
+        }
+        if (deltaX > 0 && fractionalRemainderX < 0) || (deltaX < 0 && fractionalRemainderX > 0) {
+            fractionalRemainderX = 0
+        }
 
         let sign: CGFloat = naturalScroll ? 1.0 : -1.0
         let totalY = deltaY * sign * scrollSensitivity + fractionalRemainderY
@@ -415,7 +479,7 @@ final class TouchGestureHandler {
         event.post(tap: .cghidEventTap)
     }
 
-    /// 強制釋放可能處於按住狀態的滑鼠左鍵，防止滑動時拖曳選取／文字反白 (Anti-Highlight)
+    /// 強制取消任何可能的滑鼠拖曳狀態，避免滑動時產生文字反白選取 (Anti-Highlight)
     private func cancelAnyMouseDrag(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         guard let up = CGEvent(
@@ -483,7 +547,7 @@ final class TouchGestureHandler {
 
     private func synthesizeMouseEvent(type: CGEventType, point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
-
+        CGWarpMouseCursorPosition(point)
         let event = CGEvent(
             mouseEventSource: nil,
             mouseType: type,
