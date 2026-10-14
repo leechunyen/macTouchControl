@@ -35,7 +35,7 @@ struct ContentView: View {
                     // 3. 螢幕資訊一覽
                     displaysOverviewSection
 
-                    // 4. 未來手勢功能預覽區（支援折疊）
+                    // 4. 手勢與捲動功能區（支援折疊）
                     upcomingGesturesSection
                 }
                 .padding(20)
@@ -53,7 +53,7 @@ struct ContentView: View {
                 .foregroundColor(.accentColor)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(loc.t(.appName))
+                Text("macTouchControl")
                     .font(.title2)
                     .fontWeight(.bold)
                 Text(loc.t(.appSubtitle))
@@ -89,11 +89,15 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: isPermissionsExpanded ? 14 : 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isPermissionSectionExpanded = !isPermissionsExpanded
+                    if isPermissionSectionExpanded == nil {
+                        isPermissionSectionExpanded = permissionManager.isAllGranted
+                    } else {
+                        isPermissionSectionExpanded?.toggle()
+                    }
                 }
             } label: {
                 HStack {
-                    Label(loc.t(.permissionSectionTitle), systemImage: "lock.shield")
+                    Label(loc.t(.permissionSectionTitle), systemImage: "shield.lefthalf.filled")
                         .font(.headline)
                         .foregroundColor(.primary)
 
@@ -103,10 +107,18 @@ struct ContentView: View {
                         Text(loc.t(.permissionAllGranted))
                             .font(.caption)
                             .foregroundColor(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.12))
+                            .cornerRadius(6)
                     } else {
                         Text(loc.t(.permissionMissingWarning))
                             .font(.caption)
                             .foregroundColor(.orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12))
+                            .cornerRadius(6)
                     }
 
                     Image(systemName: isPermissionsExpanded ? "chevron.up" : "chevron.down")
@@ -119,63 +131,56 @@ struct ContentView: View {
             .buttonStyle(.plain)
 
             if isPermissionsExpanded {
-                VStack(spacing: 10) {
-                    // 輔助使用
+                VStack(spacing: 12) {
                     permissionRow(
                         title: loc.t(.accessibilityTitle),
                         description: loc.t(.accessibilityDesc),
                         isGranted: permissionManager.isAccessibilityGranted,
-                        onRequest: {
-                            permissionManager.requestAccessibility()
-                        }
+                        action: { permissionManager.requestAccessibility() }
                     )
 
                     Divider()
 
-                    // 輸入監控
                     permissionRow(
                         title: loc.t(.inputMonitoringTitle),
                         description: loc.t(.inputMonitoringDesc),
                         isGranted: permissionManager.isInputMonitoringGranted,
-                        onRequest: {
-                            permissionManager.requestInputMonitoring()
-                        }
+                        action: { permissionManager.requestInputMonitoring() }
                     )
-                }
-                .padding(14)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(10)
 
-                // 關鍵拖曳授權按鈕與說明
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "questionmark.folder")
-                        .font(.system(size: 20))
-                        .foregroundColor(.accentColor)
-                        .padding(.top, 2)
+                    // 拖曳授權輔助說明提示
+                    if !permissionManager.isAllGranted {
+                        Divider()
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(loc.t(.dragHelperTitle))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.accentColor)
 
-                        Text(loc.t(.dragHelperDesc))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(loc.t(.dragHelperTitle))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text(loc.t(.dragHelperDesc))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Button(loc.t(.revealInFinderButton)) {
+                                permissionManager.revealAppInFinder()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                        }
+                        .padding(10)
+                        .background(Color.accentColor.opacity(0.08))
+                        .cornerRadius(8)
                     }
-
-                    Spacer()
-
-                    Button {
-                        permissionManager.revealAppInFinder()
-                    } label: {
-                        Label(loc.t(.revealInFinderButton), systemImage: "arrow.up.forward.app")
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
-                .padding(12)
-                .background(Color.accentColor.opacity(0.08))
-                .cornerRadius(8)
+                .padding(.top, 4)
             }
         }
         .padding(16)
@@ -187,16 +192,21 @@ struct ContentView: View {
         )
     }
 
-    private func permissionRow(title: String, description: String, isGranted: Bool, onRequest: @escaping () -> Void) -> some View {
+    private func permissionRow(
+        title: String,
+        description: String,
+        isGranted: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         HStack {
-            Image(systemName: isGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundColor(isGranted ? .green : .red)
-                .font(.system(size: 20))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                    .fontWeight(.medium)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: isGranted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(isGranted ? .green : .orange)
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
                 Text(description)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -207,17 +217,15 @@ struct ContentView: View {
             if isGranted {
                 Text(loc.t(.permissionGrantedBadge))
                     .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.green)
+                    .foregroundColor(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.12))
+                    .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(6)
             } else {
-                Button(loc.t(.permissionRequestButton)) {
-                    onRequest()
-                }
-                .buttonStyle(.bordered)
+                Button(loc.t(.permissionRequestButton), action: action)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
             }
         }
     }
@@ -226,7 +234,7 @@ struct ContentView: View {
     private var deviceMappingSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label(loc.t(.mappingSectionTitle), systemImage: "display.2")
+                Label(loc.t(.mappingSectionTitle), systemImage: "hand.tap")
                     .font(.headline)
 
                 Spacer()
@@ -238,6 +246,7 @@ struct ContentView: View {
                     Label(loc.t(.rescanButton), systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             if displayManager.isMirroringActive {
@@ -245,7 +254,7 @@ struct ContentView: View {
                     Image(systemName: "rectangle.on.rectangle")
                         .foregroundColor(.blue)
                     Text(loc.t(.mirrorModeNotice))
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 .padding(12)
@@ -555,7 +564,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    // 2. Windows 風格長按觸發右鍵（已完成功能）
+                    // 2. Windows 風格長按觸發右鍵（已完成功能，預設開啟，使用者可自由切換）
                     HStack(alignment: .center) {
                         Image(systemName: "cursorarrow.click.2")
                             .font(.system(size: 20))
@@ -573,16 +582,15 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Text(loc.t(.nextPhaseBadge))
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.green.opacity(0.12))
-                            .foregroundColor(.green)
-                            .cornerRadius(6)
+                        Toggle("", isOn: Binding<Bool>(
+                            get: { gestureHandler.isLongPressRightClickEnabled },
+                            set: { gestureHandler.isLongPressRightClickEnabled = $0 }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
                     }
                     .padding(12)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(gestureHandler.isLongPressRightClickEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
                     .cornerRadius(8)
 
                     Divider()
@@ -605,9 +613,7 @@ struct ContentView: View {
                         comingSoonBadge: loc.t(.comingSoonBadge)
                     )
                 }
-                .padding(14)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(10)
+                .padding(.top, 4)
             }
         }
         .padding(16)
@@ -619,8 +625,13 @@ struct ContentView: View {
         )
     }
 
-    private func gesturePreviewRow(title: String, description: String, icon: String, comingSoonBadge: String) -> some View {
-        HStack {
+    private func gesturePreviewRow(
+        title: String,
+        description: String,
+        icon: String,
+        comingSoonBadge: String
+    ) -> some View {
+        HStack(alignment: .center) {
             Image(systemName: icon)
                 .font(.system(size: 20))
                 .foregroundColor(.secondary)
@@ -641,9 +652,12 @@ struct ContentView: View {
                 .font(.caption2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.12))
-                .foregroundColor(.secondary)
+                .background(Color.purple.opacity(0.12))
+                .foregroundColor(.purple)
                 .cornerRadius(6)
         }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
     }
 }

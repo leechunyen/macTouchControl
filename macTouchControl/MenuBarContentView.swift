@@ -49,6 +49,17 @@ struct MenuBarContentView: View {
             }
         }
 
+        // 長按觸發右鍵開關（Windows 風格）
+        Button {
+            gestureHandler.isLongPressRightClickEnabled.toggle()
+        } label: {
+            if gestureHandler.isLongPressRightClickEnabled {
+                Text("✓ \(loc.t(.menuToggleLongPressRightClick))")
+            } else {
+                Text("   \(loc.t(.menuToggleLongPressRightClick))")
+            }
+        }
+
         Button(loc.t(.menuOpenPanel)) {
             openMainWindow()
         }

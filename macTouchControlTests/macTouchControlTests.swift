@@ -50,6 +50,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.mainDisplayBadge) == "Main")
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
         #expect(manager.t(.longPressRightClickTitle) == "Long Press for Right-Click (Windows Style)")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press for Right-Click (Windows Style)")
 
         // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
         manager.selectedLanguage = .zh_tw
@@ -62,6 +63,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
         #expect(manager.t(.longPressRightClickTitle) == "長按觸發右鍵 (如同 Windows 觸控體驗)")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "長按觸發右鍵選單 (Windows 風格)")
     }
 
     @Test("測試觸控設備座標標準化與邊界約束")
@@ -186,20 +188,31 @@ struct MacTouchControlTests {
         #expect(asusTouch == true)
     }
 
-    @Test("測試平板觸控滑動手勢處理器預設值、雙向捲動與防誤觸點擊")
+    @Test("測試平板觸控滑動手勢處理器預設值、雙向捲動、長按右鍵開關與防誤觸")
     @MainActor
     func testTouchGestureHandlerCycle() {
         // 先清除持久化快取，以驗證乾淨環境下的預設值
         UserDefaults.standard.removeObject(forKey: "macTouchControl.touchScrollEnabled")
         UserDefaults.standard.removeObject(forKey: "macTouchControl.naturalScroll")
         UserDefaults.standard.removeObject(forKey: "macTouchControl.scrollSensitivity")
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.longPressRightClickEnabled")
 
         let handler = TouchGestureHandler()
 
-        // 需求4：觸摸屏滑動體驗和自然滑動方向必須默認開啟
+        // 驗證核心預設值：平板滑動體驗、自然滑動方向、長按觸發右鍵預設必須開啟
         #expect(handler.isTouchScrollEnabled == true)
         #expect(handler.naturalScroll == true)
         #expect(handler.scrollSensitivity == 1.0)
+        #expect(handler.isLongPressRightClickEnabled == true)
+
+        // 測試使用者自訂開關長按右鍵功能
+        handler.isLongPressRightClickEnabled = false
+        #expect(handler.isLongPressRightClickEnabled == false)
+        #expect(UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled") == false)
+
+        handler.isLongPressRightClickEnabled = true
+        #expect(handler.isLongPressRightClickEnabled == true)
+        #expect(UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled") == true)
 
         let tapPoint = CGPoint(x: 200, y: 300)
         let norm = CGPoint(x: 0.2, y: 0.3)
@@ -212,7 +225,7 @@ struct MacTouchControlTests {
         let scrollStart = CGPoint(x: 300, y: 400)
         handler.handleTouch(point: scrollStart, normalized: norm, isDown: true, tipChanged: true)
 
-        // 移動水平 (dx = +30) 與垂直 (dy = +40) 像素，超過 4.0 點閥值立即觸發雙向捲動
+        // 移動水平 (dx = +30) 與垂直 (dy = +40) 像素，超過 6.0 點閥值立即觸發雙向捲動
         let scrollMove1 = CGPoint(x: 330, y: 440)
         handler.handleTouch(point: scrollMove1, normalized: norm, isDown: true, tipChanged: false)
 
@@ -222,7 +235,7 @@ struct MacTouchControlTests {
         // 釋放手勢：由於處於 scrolling 狀態，絕對不會誤觸發左鍵點擊（防誤點擊）
         handler.handleTouch(point: scrollMove2, normalized: norm, isDown: false, tipChanged: true)
 
-        // 模擬觸碰中斷可能存在的慣性滑行
+        // 模擬觸碰中斷可能存在的慣性滑行（煞車碰觸），抬起時絕不觸發誤點擊
         handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: true, tipChanged: true)
         handler.handleTouch(point: CGPoint(x: 380, y: 500), normalized: norm, isDown: false, tipChanged: true)
 
@@ -236,9 +249,10 @@ struct MacTouchControlTests {
         handler.isTouchScrollEnabled = false
         #expect(handler.isTouchScrollEnabled == false)
 
-        // 測試重設回預設值
+        // 重設回預設值
         handler.isTouchScrollEnabled = true
         handler.naturalScroll = true
         handler.scrollSensitivity = 1.0
+        handler.isLongPressRightClickEnabled = true
     }
 }

@@ -2,21 +2,23 @@
 //  LocalizationManager.swift
 //  macTouchControl
 //
+//  Created by LeeChunYen on 14/10/2026.
+//
 
 import Foundation
-import Observation
+import SwiftUI
 
 enum AppLanguage: String, CaseIterable, Identifiable {
     case system = "system"
-    case zh_tw = "zh-TW"
-    case en_us = "en-US"
+    case zh_tw = "zh-Hant"
+    case en_us = "en"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .system:
-            return "System Default"
+            return "跟隨系統 (System)"
         case .zh_tw:
             return "繁體中文 (台灣)"
         case .en_us:
@@ -26,13 +28,12 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 }
 
 enum LocKey {
-    // App Header
-    case appName
+    // App Header / Status
     case appSubtitle
     case statusActive
-    case statusNeedPermission
+    case statusInactive
 
-    // Permission Section
+    // Permissions Section
     case permissionSectionTitle
     case permissionAllGranted
     case permissionMissingWarning
@@ -81,6 +82,7 @@ enum LocKey {
     case longPressRightClickTitle
     case longPressRightClickDesc
     case menuToggleTouchScroll
+    case menuToggleLongPressRightClick
     case gestureNotificationCenterTitle
     case gestureNotificationCenterDesc
     case gestureDockTitle
@@ -109,7 +111,7 @@ final class LocalizationManager {
 
     private let userDefaultsKey = "macTouchControl.appLanguage"
 
-    var selectedLanguage: AppLanguage = .system {
+    var selectedLanguage: AppLanguage {
         didSet {
             UserDefaults.standard.set(selectedLanguage.rawValue, forKey: userDefaultsKey)
         }
@@ -164,39 +166,38 @@ final class LocalizationManager {
         }
     }
 
+    // MARK: - 繁體中文（台灣標準資訊科技用語：裝置、螢幕、捲動、預設）
     private func stringForZhTW(_ key: LocKey) -> String {
         switch key {
-        case .appName:
-            return "macTouchControl"
         case .appSubtitle:
-            return "macOS 多螢幕觸控管理與游標映射工具"
+            return "外接觸控螢幕專用對應工具"
         case .statusActive:
             return "服務運作中"
-        case .statusNeedPermission:
-            return "需要權限"
+        case .statusInactive:
+            return "服務暫停（缺少必要權限）"
 
         case .permissionSectionTitle:
-            return "系統權限檢查與配置"
+            return "系統安全性與權限設定"
         case .permissionAllGranted:
-            return "✓ 已具備所有必要權限"
+            return "✓ 所有必要權限皆已授權完畢"
         case .permissionMissingWarning:
-            return "⚠️ 尚有權限未取得，部分功能可能無法使用"
+            return "⚠️ 尚未授予完整權限，部分功能可能無法正常運作。"
         case .accessibilityTitle:
             return "輔助使用 (Accessibility)"
         case .accessibilityDesc:
-            return "用於跨應用程式發送合成滑鼠點擊、拖曳與游標位置跳轉"
+            return "用於發送跨視窗的合成滑鼠點擊、拖曳、捲動與跨螢幕游標定位跳轉。"
         case .inputMonitoringTitle:
             return "輸入監控 (Input Monitoring)"
         case .inputMonitoringDesc:
-            return "用於在背景持續攔截並接收外部 USB / 藍牙觸控螢幕的硬體事件"
+            return "用於背景接收外接 USB / 藍牙觸控螢幕的硬體原始觸控報告與座標。"
         case .permissionGrantedBadge:
             return "已授權"
         case .permissionRequestButton:
-            return "取得授權"
+            return "前往授權"
         case .dragHelperTitle:
-            return "無法授權或系統未彈出對話框？"
+            return "無法點選授權或未跳出對話框？"
         case .dragHelperDesc:
-            return "點擊右方按鈕會在 Finder 中直接選中此 App，您可以將它「直接拖曳」進系統設定的【輔助使用】或【輸入監控】清單中即可完成授權。"
+            return "點選右側按鈕在 Finder 中開啟此 App，將 App 圖示直接拖曳至系統設定的「輔助使用」或「輸入監控」清單中即可快速完成授權。"
         case .revealInFinderButton:
             return "在 Finder 中顯示 App"
 
@@ -259,9 +260,11 @@ final class LocalizationManager {
         case .longPressRightClickTitle:
             return "長按觸發右鍵 (如同 Windows 觸控體驗)"
         case .longPressRightClickDesc:
-            return "手指在螢幕定點長按約 0.45 秒立即呼叫右鍵捷徑選單，抬起手指不會誤觸左鍵"
+            return "手指在螢幕定點長按約 0.45 秒立即呼叫右鍵快捷選單，抬起手指不會誤觸發左鍵"
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
+        case .menuToggleLongPressRightClick:
+            return "長按觸發右鍵選單 (Windows 風格)"
         case .gestureNotificationCenterTitle:
             return "右緣向內滑動開通知中心"
         case .gestureNotificationCenterDesc:
@@ -293,20 +296,19 @@ final class LocalizationManager {
         case .unassignedDisplay:
             return "未指定螢幕"
         case .windowTitle:
-            return "macTouchControl 控制面板"
+            return "macTouchControl - 外接觸控螢幕對應工具"
         }
     }
 
+    // MARK: - English (US)
     private func stringForEnUS(_ key: LocKey) -> String {
         switch key {
-        case .appName:
-            return "macTouchControl"
         case .appSubtitle:
-            return "macOS Multi-Monitor Touch Management & Cursor Mapping"
+            return "External Touchscreen Mapping Utility"
         case .statusActive:
             return "Service Active"
-        case .statusNeedPermission:
-            return "Permissions Required"
+        case .statusInactive:
+            return "Service Paused (Missing Permissions)"
 
         case .permissionSectionTitle:
             return "System Permissions"
@@ -395,6 +397,8 @@ final class LocalizationManager {
             return "Touch and hold for ~0.45s to invoke context menu, release without accidental click"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
+        case .menuToggleLongPressRightClick:
+            return "Long Press for Right-Click (Windows Style)"
         case .gestureNotificationCenterTitle:
             return "Swipe In from Right for Notification Center"
         case .gestureNotificationCenterDesc:
@@ -426,7 +430,7 @@ final class LocalizationManager {
         case .unassignedDisplay:
             return "Unassigned Display"
         case .windowTitle:
-            return "macTouchControl Preferences"
+            return "macTouchControl - External Touchscreen Utility"
         }
     }
 }
