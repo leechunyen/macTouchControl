@@ -9,13 +9,94 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+// MARK: - Background Window Frame Cache (0 毫秒極速快取引擎)
+
+/// 背景全域視窗快取引擎，提供 0 毫秒極速查詢，絕不阻塞觸控主執行緒
+final class WindowFrameCache: @unchecked Sendable {
+    static let shared = WindowFrameCache()
+
+    private let lock = NSLock()
+    private var titleBarRects: [CGRect] = []
+    private var lastUpdateTime: TimeInterval = 0
+    private var isUpdating: Bool = false
+
+    private init() {
+        refreshAsync()
+
+        // 監聽前台程式切換與視窗重繪通知
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshAsync()
+        }
+    }
+
+    /// 在背景線程異步刷新所有可見視窗頂部標題列邊界
+    func refreshAsync() {
+        guard !isUpdating else { return }
+        isUpdating = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            defer { self?.isUpdating = false }
+            let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+            guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return }
+
+            var newRects: [CGRect] = []
+            for window in windowList {
+                guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+                guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
+                      let x = boundsDict["X"] as? CGFloat,
+                      let y = boundsDict["Y"] as? CGFloat,
+                      let w = boundsDict["Width"] as? CGFloat,
+                      let h = boundsDict["Height"] as? CGFloat else { continue }
+
+                // 標題列高度預設約 52pt
+                let titleBarHeight: CGFloat = 52.0
+                let titleBarRect = CGRect(x: x, y: y, width: w, height: min(h, titleBarHeight))
+                newRects.append(titleBarRect)
+            }
+
+            self?.lock.lock()
+            self?.titleBarRects = newRects
+            self?.lastUpdateTime = ProcessInfo.processInfo.systemUptime
+            self?.lock.unlock()
+        }
+    }
+
+    /// 0 毫秒高速判定落指點是否位於任何視窗標題列（排除左上角交通燈）
+    func isTitleBar(at point: CGPoint) -> Bool {
+        // 定期背景更新
+        if ProcessInfo.processInfo.systemUptime - lastUpdateTime > 1.0 {
+            refreshAsync()
+        }
+
+        lock.lock()
+        let rects = titleBarRects
+        lock.unlock()
+
+        for rect in rects {
+            if rect.contains(point) {
+                // 排除視窗左上角紅黃綠交通燈按鈕區域（寬約 75pt）
+                let trafficLights = CGRect(x: rect.origin.x, y: rect.origin.y, width: 75, height: rect.height)
+                if !trafficLights.contains(point) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+}
+
+// MARK: - Touch Gesture Handler Engine
+
 /// 外接觸控螢幕專用觸控手勢處理引擎
 /// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
 /// 2. 視窗拖曳與「按著拖」支援（Window Title Bar Drag & Press-and-Hold Drag）：
 ///    - 觸摸任何視窗頂部標題列直接滑動即可拖曳移動視窗（Direct Window Dragging）
 ///    - 任何區域定點長按（約 0.38s）後移動，無縫切入「按著拖」（Press-and-Hold Drag），可自由拖曳視窗、物件、滑桿或文字選取
 /// 3. Windows 風格長按觸發右鍵：定點長按後若「抬起手指」，即觸發右鍵捷徑選單（長按後若「滑動」則自動轉為拖曳，二者完美互不衝突）
-/// 4. 游標與視窗命中焦點同步（WindowServer Hit-Test Pointer Sync）：落指與捲動時即時同步更新 WindowServer 指針目標 (mouseMoved + event.location + 跨螢幕應用無感啟動)，徹底解決跨視窗／點選開關後滾動卡頓的根本問題
+/// 4. 游標與視窗命中焦點同步（WindowServer Hit-Test Pointer Sync）：落指與捲動時即時同步更新 WindowServer 指針目標
 /// 5. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
 /// 6. 精確浮點次像素輸出（1:1 True Pixel Scroll & Sensitivity）：直接填寫 fixedPtDelta 與 pointDelta，速度拉條完全真實生效，絲滑流暢不卡頓
 /// 7. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：手勢一旦位移即鎖死 Click，白名單事件簽名（0x544F5543）杜絕幽靈誤點擊
@@ -66,7 +147,7 @@ final class TouchGestureHandler {
     private enum GestureState {
         case idle
         /// 手指剛落下，尚未判定為點擊、滑動、長按或拖曳
-        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat)
+        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat, isTitleBar: Bool)
         /// 觸碰剛好用來煞停慣性滑行（碰觸煞車），抬手時嚴禁誤點擊
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
@@ -138,7 +219,6 @@ final class TouchGestureHandler {
     private var fractionalRemainderY: CGFloat = 0
 
     init() {
-        // 註冊系統預設值：滑動模式、自然捲動與長按右鍵預設必須開啟
         UserDefaults.standard.register(defaults: [
             "macTouchControl.touchScrollEnabled": true,
             "macTouchControl.naturalScroll": true,
@@ -180,10 +260,10 @@ final class TouchGestureHandler {
     private func handleTouchDown(point: CGPoint, normalized: CGPoint, timestamp: TimeInterval) {
         cancelLongPressTimer()
 
-        // 核心同步 1：立即啟動落指位置下方的應用程式，消除跨螢幕焦點滯留與 macOS 背景 App Nap 節流
+        // 核心同步 1：背景異步啟動落指位置下方的應用程式，消除跨螢幕焦點滯留與 macOS 背景 App Nap 節流
         activateAppUnder(point: point)
 
-        // 核心同步 2：落指時立即更新 WindowServer 命中焦點與游標位置，杜絕跨視窗/開關操作後的焦點滯留
+        // 核心同步 2：落指時立即更新 WindowServer 命中焦點與游標位置
         updateWindowServerPointer(at: point)
         lastScrollPoint = point
 
@@ -197,11 +277,11 @@ final class TouchGestureHandler {
 
         guard isTouchScrollEnabled else {
             // 若關閉平板滑動模式，走傳統直接滑鼠拖曳
-            synthesizeMouseEvent(type: .leftMouseDown, point: point)
+            postMouseDown(at: point)
             return
         }
 
-        // 若前次處於慣性滑行中，本次落指立即發揮煞車作用，同時具備一觸即發的換向反應能力
+        // 若前次處於慣性滑行中，本次落指立即發揮煞車作用
         if wasMomentumActive {
             lastScrollTimestamp = timestamp
             gestureState = .stoppingMomentum(point: point)
@@ -209,19 +289,22 @@ final class TouchGestureHandler {
         }
 
         let inActiveSession = isScrollSessionActive
+        // 0 毫秒記憶體極速快取判定是否命中視窗標題列
+        let onTitleBar = WindowFrameCache.shared.isTitleBar(at: point)
 
         gestureState = .pending(
             startPoint: point,
             startNormalized: normalized,
             startTime: timestamp,
-            maxDisplacement: 0
+            maxDisplacement: 0,
+            isTitleBar: onTitleBar
         )
 
         // 若非連續快速滑動冷卻中，排程定點長按計時器（用於觸發右鍵或就緒「按著拖曳」）
         if !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
-                if case .pending(let startPoint, _, _, let maxDisp) = self.gestureState {
+                if case .pending(let startPoint, _, _, let maxDisp, _) = self.gestureState {
                     if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
                         // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
                         self.gestureState = .longPressArmed(point: startPoint)
@@ -235,7 +318,7 @@ final class TouchGestureHandler {
 
     private func handleTouchMoved(point: CGPoint, timestamp: TimeInterval) {
         guard isTouchScrollEnabled else {
-            synthesizeMouseEvent(type: .leftMouseDragged, point: point)
+            postMouseDragged(to: point)
             return
         }
 
@@ -257,7 +340,7 @@ final class TouchGestureHandler {
                 postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
             }
 
-        case .pending(let startPoint, let startNorm, let startTime, let maxDisp):
+        case .pending(let startPoint, let startNorm, let startTime, let maxDisp, let isTitleBar):
             let dx = point.x - startPoint.x
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
@@ -267,21 +350,29 @@ final class TouchGestureHandler {
             if distance >= threshold {
                 cancelLongPressTimer()
 
-                // 超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
-                hasScrolledInCurrentGesture = true
-                lastScrollTimestamp = timestamp
-                lastScrollPoint = point
+                if isTitleBar {
+                    // 【視窗標題列直接拖曳】：手指在標題列滑動，直接進行視窗拖曳！
+                    gestureState = .dragging(lastPoint: point)
+                    postMouseDown(at: startPoint)
+                    postMouseDragged(to: point)
+                } else {
+                    // 【內容區域滑動】：超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
+                    hasScrolledInCurrentGesture = true
+                    lastScrollTimestamp = timestamp
+                    lastScrollPoint = point
 
-                gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
+                    gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
 
-                // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
-                postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
+                    // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
+                    postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
+                }
             } else {
                 gestureState = .pending(
                     startPoint: startPoint,
                     startNormalized: startNorm,
                     startTime: startTime,
-                    maxDisplacement: updatedMaxDisp
+                    maxDisplacement: updatedMaxDisp,
+                    isTitleBar: isTitleBar
                 )
             }
 
@@ -295,14 +386,14 @@ final class TouchGestureHandler {
                 // 使用者定點長按後開始移動手指，立刻轉入左鍵按住拖曳模式！
                 // 可自由拖曳任何視窗、檔案、文字選取或滑桿！
                 gestureState = .dragging(lastPoint: point)
-                synthesizeMouseEvent(type: .leftMouseDown, point: startPoint)
-                synthesizeMouseEvent(type: .leftMouseDragged, point: point)
+                postMouseDown(at: startPoint)
+                postMouseDragged(to: point)
             }
 
         case .dragging:
-            // 正在進行物件或視窗拖曳，發送連續左鍵拖曳事件
+            // 正在進行物件或視窗拖曳，發送連續專用左鍵拖曳事件
             gestureState = .dragging(lastPoint: point)
-            synthesizeMouseEvent(type: .leftMouseDragged, point: point)
+            postMouseDragged(to: point)
 
         case .scrolling(let lastPoint, var velocityTracker):
             let dx = point.x - lastPoint.x
@@ -338,7 +429,7 @@ final class TouchGestureHandler {
         cancelLongPressTimer()
 
         guard isTouchScrollEnabled else {
-            synthesizeMouseEvent(type: .leftMouseUp, point: point)
+            postMouseUp(at: point)
             return
         }
 
@@ -351,7 +442,7 @@ final class TouchGestureHandler {
             lastScrollTimestamp = timestamp
             // 煞車手勢抬起，絕對不觸發任何點擊
 
-        case .pending(let startPoint, _, let startTime, let maxDisp):
+        case .pending(let startPoint, _, let startTime, let maxDisp, _):
             gestureState = .idle
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
@@ -380,7 +471,8 @@ final class TouchGestureHandler {
         case .dragging:
             // 【拖曳結束釋放】：手指抬起，發送 leftMouseUp 結束視窗或物件拖曳
             gestureState = .idle
-            synthesizeMouseEvent(type: .leftMouseUp, point: point)
+            postMouseUp(at: point)
+            WindowFrameCache.shared.refreshAsync()
 
         case .scrolling(_, let velocityTracker):
             gestureState = .idle
@@ -467,7 +559,7 @@ final class TouchGestureHandler {
 
     // MARK: - Low-Level CGEvent Synthesis (2D Scroll, Click & Drag)
 
-    /// 確保落指時目標螢幕下方的應用程式與視窗在背景異步獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流，同時絕不阻塞主線程實時手勢判定
+    /// 確保落指時目標螢幕下方的應用程式與視窗在背景異步獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流，同時絕不阻塞主執行緒即時手勢判定
     private func activateAppUnder(point: CGPoint) {
         DispatchQueue.global(qos: .userInteractive).async {
             let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
@@ -487,7 +579,7 @@ final class TouchGestureHandler {
                        let app = NSRunningApplication(processIdentifier: pid),
                        app.bundleIdentifier != Bundle.main.bundleIdentifier {
                         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier == pid {
-                            return // 已經是前台活躍應用，無需重複啟動
+                            return
                         }
                         app.activate()
                         return
@@ -652,13 +744,45 @@ final class TouchGestureHandler {
         up.post(tap: .cghidEventTap)
     }
 
-    /// 合成滑鼠左鍵事件（支援直接拖曳與按著拖曳）
-    private func synthesizeMouseEvent(type: CGEventType, point: CGPoint) {
+    // MARK: - Dedicated Mouse Drag Actions (專用拖曳合成，無任何中斷干擾)
+
+    /// 發送乾淨的滑鼠左鍵按下（啟動視窗或物件拖曳）
+    private func postMouseDown(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
-        updateWindowServerPointer(at: point)
+        CGWarpMouseCursorPosition(point)
         guard let event = CGEvent(
             mouseEventSource: nil,
-            mouseType: type,
+            mouseType: .leftMouseDown,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { return }
+        event.location = point
+        event.setIntegerValueField(.mouseEventClickState, value: 1)
+        event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+        event.post(tap: .cghidEventTap)
+    }
+
+    /// 發送連續的滑鼠左鍵拖曳（絕不插入 mouseMoved 或 cursor warp，確保 WindowServer 拖曳不中斷）
+    private func postMouseDragged(to point: CGPoint) {
+        guard PermissionManager.shared.isAccessibilityGranted else { return }
+        guard let event = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseDragged,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { return }
+        event.location = point
+        event.setIntegerValueField(.mouseEventClickState, value: 1)
+        event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+        event.post(tap: .cghidEventTap)
+    }
+
+    /// 發送滑鼠左鍵釋放（結束視窗或物件拖曳）
+    private func postMouseUp(at point: CGPoint) {
+        guard PermissionManager.shared.isAccessibilityGranted else { return }
+        guard let event = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseUp,
             mouseCursorPosition: point,
             mouseButton: .left
         ) else { return }
