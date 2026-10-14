@@ -20,9 +20,34 @@ final class TouchDeviceManager {
     var lastNormalizedPoint: CGPoint? = nil
     var isRunning: Bool = false
 
-    /// 目前是否有任何外接觸控螢幕正處於手指按壓／接觸中
+    /// 最近一次收到外接觸控硬體 IOHID 封包的系統時間戳
+    private(set) var lastHardwarePacketTime: TimeInterval = 0
+
+    /// 目前是否有任何外接觸控螢幕正處於硬體按壓接觸中（具備 100ms 超時保護機制，防止硬體漏包卡死滑鼠）
+    var isHardwareTouchCurrentlyActive: Bool {
+        let isTouching = devices.values.contains { $0.isTouching }
+        let isDown = deviceStates.values.contains { $0.isDown }
+        let isRecent = (ProcessInfo.processInfo.systemUptime - lastHardwarePacketTime < 0.10)
+        return (isTouching || isDown) && isRecent
+    }
+
+    /// 目前外接觸控螢幕在全域座標系中的邊界（供事件隔離）
+    var activeTouchDisplayBounds: CGRect? {
+        guard let id = lastActiveDeviceID ?? devices.keys.first else { return nil }
+        let displayManager = DisplayManager.shared
+        let mappingStore = MappingStore.shared
+        if displayManager.isMirroringActive {
+            return displayManager.mainDisplay?.bounds
+        }
+        let target = mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays)
+            ?? displayManager.displays.first(where: { !$0.isBuiltin })
+            ?? displayManager.mainDisplay
+        return target?.bounds
+    }
+
+    /// 目前是否有任何外接觸控螢幕處於按壓接觸中
     var isAnyTouchActive: Bool {
-        devices.values.contains { $0.isTouching } || deviceStates.values.contains { $0.isDown }
+        isHardwareTouchCurrentlyActive
     }
 
     /// 上次手指離開觸控螢幕的時間戳
@@ -146,30 +171,39 @@ final class TouchDeviceManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 檢查是否為 macTouchControl 主動合成發送的白名單事件（簽名 0x544F5543 = "TOUC"）
+                // 1. 檢查是否為 macTouchControl 主動合成發送的白名單事件（簽名 0x544F5543 = "TOUC"）
                 let signature = event.getIntegerValueField(.eventSourceUserData)
                 if signature == TouchGestureHandler.synthesizedEventSignature {
-                    // 由本程式經嚴格手勢判定後合法派發的點擊，完全放行
+                    // 由本程式經手勢引擎精準判定後合法派發的點擊與拖曳，完全放行
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 若觸控螢幕處於碰觸中（或碰觸剛結束 150ms 內），或事件本身為 Digitizer / Tablet 硬體副類型（1=tabletPoint, 2=tabletProximity, 3=touch）：
-                let isTouchActive = manager.isAnyTouchActive
-                let recentlyReleased = (ProcessInfo.processInfo.systemUptime - manager.lastTouchReleaseTime < 0.15)
+                // 2. 嚴格區分滑鼠與觸控螢幕：若觸控螢幕當前並無手指按壓，100% 放行滑鼠與觸控板所有操作！
+                guard manager.isHardwareTouchCurrentlyActive else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // 3. 螢幕空間隔離：若事件座標不在外接觸控螢幕內（例如在 MacBook 內建螢幕），100% 放行，絕不干擾主螢幕滑鼠！
+                let location = event.location
+                guard let touchBounds = manager.activeTouchDisplayBounds, touchBounds.contains(location) else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // 4. 觸控點近距隔離：若滑鼠事件位置距離手指落點超過 80pt，判定為實體滑鼠操作，完全放行
+                if let lastPt = manager.lastTouchPoint {
+                    let dist = hypot(location.x - lastPt.x, location.y - lastPt.y)
+                    if dist > 80.0 {
+                        return Unmanaged.passUnretained(event)
+                    }
+                }
+
+                // 5. 僅攔截外接觸控螢幕在「手勢手指接觸期間」由系統/硬體產生的未授權幽靈事件
                 let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
-                let subtype = event.getIntegerValueField(.mouseEventSubtype)
-                let isDigitizerEvent = (subtype == 1 || subtype == 2 || subtype == 3)
-
-                if isTouchActive || recentlyReleased || isDigitizerEvent {
-                    // 1. 右鍵事件過濾：任何非本 App 主動授權派發的硬體/系統右鍵一律攔截銷毀（確保關閉右鍵時絕對生效）
-                    if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
-                        return nil
-                    }
-
-                    // 2. 左鍵拖曳與點擊過濾：啟用了平板滑動模式時，徹底阻斷 macOS 內核將觸控板誤當滑鼠產生的幽靈拖曳與誤點擊
-                    if isTabletScroll {
-                        return nil
-                    }
+                if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
+                    return nil
+                }
+                if isTabletScroll {
+                    return nil
                 }
 
                 return Unmanaged.passUnretained(event)
@@ -352,6 +386,8 @@ final class TouchDeviceManager {
     // MARK: - Input Value Handling (封包合併與零延遲跟手架構)
 
     private func handleInputValue(_ value: IOHIDValue) {
+        lastHardwarePacketTime = ProcessInfo.processInfo.systemUptime
+
         let element = IOHIDValueGetElement(value)
         let device = IOHIDElementGetDevice(element)
         let id = deviceID(for: device)
