@@ -22,7 +22,7 @@ final class TouchDeviceManager {
 
     /// 目前是否有任何外接觸控螢幕正處於手指按壓／接觸中
     var isAnyTouchActive: Bool {
-        devices.values.contains { $0.isTouching }
+        devices.values.contains { $0.isTouching } || deviceStates.values.contains { $0.isDown }
     }
 
     /// 上次手指離開觸控螢幕的時間戳
@@ -153,12 +153,14 @@ final class TouchDeviceManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 若觸控螢幕處於碰觸中（或碰觸剛結束 150ms 內）：
+                // 若觸控螢幕處於碰觸中（或碰觸剛結束 150ms 內），或事件本身為 Digitizer / Tablet 硬體副類型（1=tabletPoint, 2=tabletProximity, 3=touch）：
                 let isTouchActive = manager.isAnyTouchActive
                 let recentlyReleased = (ProcessInfo.processInfo.systemUptime - manager.lastTouchReleaseTime < 0.15)
                 let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
+                let subtype = event.getIntegerValueField(.mouseEventSubtype)
+                let isDigitizerEvent = (subtype == 1 || subtype == 2 || subtype == 3)
 
-                if isTouchActive || recentlyReleased {
+                if isTouchActive || recentlyReleased || isDigitizerEvent {
                     // 1. 右鍵事件過濾：任何非本 App 主動授權派發的硬體/系統右鍵一律攔截銷毀（確保關閉右鍵時絕對生效）
                     if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
                         return nil

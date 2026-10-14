@@ -178,7 +178,10 @@ final class TouchGestureHandler {
     private func handleTouchDown(point: CGPoint, normalized: CGPoint, timestamp: TimeInterval) {
         cancelLongPressTimer()
 
-        // 核心同步：落指時立即更新 WindowServer 命中焦點與游標位置，杜絕跨視窗/開關操作後的焦點滯留
+        // 核心同步 1：立即啟動落指位置下方的應用程式，消除跨螢幕焦點滯留與 macOS 背景 App Nap 節流
+        activateAppUnder(point: point)
+
+        // 核心同步 2：落指時立即更新 WindowServer 命中焦點與游標位置，杜絕跨視窗/開關操作後的焦點滯留
         updateWindowServerPointer(at: point)
         lastScrollPoint = point
 
@@ -437,6 +440,34 @@ final class TouchGestureHandler {
     }
 
     // MARK: - Low-Level CGEvent Synthesis (2D Scroll & Click)
+
+    /// 確保落指時目標螢幕下方的應用程式與視窗即刻獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流
+    private func activateAppUnder(point: CGPoint) {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return }
+
+        for window in windowList {
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
+                  let x = boundsDict["X"] as? CGFloat,
+                  let y = boundsDict["Y"] as? CGFloat,
+                  let w = boundsDict["Width"] as? CGFloat,
+                  let h = boundsDict["Height"] as? CGFloat else { continue }
+
+            let rect = CGRect(x: x, y: y, width: w, height: h)
+            if rect.contains(point) {
+                if let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                   let app = NSRunningApplication(processIdentifier: pid),
+                   app.bundleIdentifier != Bundle.main.bundleIdentifier {
+                    if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier == pid {
+                        return // 已經是前台活躍應用，無需重複啟動
+                    }
+                    app.activate()
+                    return
+                }
+            }
+        }
+    }
 
     /// 確保 WindowServer 立即更新指針全域命中測試（Hit-Testing）視窗，杜絕跨視窗與跨螢幕操作後的焦點滯留
     private func updateWindowServerPointer(at point: CGPoint) {
