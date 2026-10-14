@@ -41,9 +41,20 @@ struct MacTouchControlTests {
     @Test("測試動態語系切換與嚴格台灣繁體中文用語")
     @MainActor
     func testLocalizedStrings() {
-        // 驗證 UI 預設為 System 且語言選單顯示名稱
-        UserDefaults.standard.removeObject(forKey: "macTouchControl.appLanguage")
-        let freshManager = LocalizationManager()
+        // 使用隔離的測試 suite，避免覆寫或清空使用者實際的 UserDefaults 設定
+        let testSuiteName = "macTouchControl.test.\(UUID().uuidString)"
+        let testDefaults = UserDefaults(suiteName: testSuiteName)!
+        defer {
+            testDefaults.removePersistentDomain(forName: testSuiteName)
+        }
+
+        // 驗證相容性解析
+        #expect(AppLanguage.from(string: "zh_tw") == .zh_tw)
+        #expect(AppLanguage.from(string: "zh-Hant") == .zh_tw)
+        #expect(AppLanguage.from(string: "en_us") == .en_us)
+        #expect(AppLanguage.from(string: "system") == .system)
+
+        let freshManager = LocalizationManager(defaults: testDefaults)
         #expect(freshManager.selectedLanguage == .system)
         #expect(AppLanguage.system.displayName == "System")
         #expect(AppLanguage.en_us.displayName == "English (US)")
@@ -51,12 +62,14 @@ struct MacTouchControlTests {
 
         // 測試持久化保存 user setting
         freshManager.selectedLanguage = .system
-        #expect(UserDefaults.standard.string(forKey: "macTouchControl.appLanguage") == "system")
+        #expect(testDefaults.string(forKey: "macTouchControl.appLanguage") == "system")
+        #expect(testDefaults.string(forKey: "macTouchControl.language") == "system")
 
         freshManager.selectedLanguage = .zh_tw
-        #expect(UserDefaults.standard.string(forKey: "macTouchControl.appLanguage") == "zh-Hant")
+        #expect(testDefaults.string(forKey: "macTouchControl.appLanguage") == "zh-Hant")
+        #expect(testDefaults.string(forKey: "macTouchControl.language") == "zh-Hant")
 
-        let manager = LocalizationManager()
+        let manager = LocalizationManager(defaults: testDefaults)
 
         // 強制切換為英文
         manager.selectedLanguage = .en_us
@@ -327,8 +340,12 @@ struct MacTouchControlTests {
         autoStart.checkStatus()
         autoStart.evaluateLaunchTrigger()
 
-        // 驗證本地化字串
+        // 驗證本地化字串（測試完成後自動還原 shared 語言）
         let loc = LocalizationManager.shared
+        let originalLang = loc.selectedLanguage
+        defer {
+            loc.selectedLanguage = originalLang
+        }
         loc.selectedLanguage = .en_us
         #expect(loc.t(.autoStartTitle) == "Launch at Login")
         #expect(loc.t(.menuToggleAutoStart) == "Launch at Login (Auto Start)")

@@ -43,6 +43,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 720, idealWidth: 760, minHeight: 660, idealHeight: 700)
+        .navigationTitle(loc.t(.windowTitle))
         .background(Color(NSColor.windowBackgroundColor))
         .background(WindowAccessor { window in
             AppDelegate.shared.registerMainWindow(window)

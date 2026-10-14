@@ -25,6 +25,24 @@ enum AppLanguage: String, CaseIterable, Identifiable {
             return "English (US)"
         }
     }
+
+    /// 容錯相容解析語言字串（包含歷史格式 zh_tw、zh-TW、en_us 等）
+    static func from(string: String?) -> AppLanguage? {
+        guard let string = string?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty else {
+            return nil
+        }
+        let lower = string.lowercased()
+        if lower == "system" {
+            return .system
+        }
+        if lower == "en" || lower.hasPrefix("en_") || lower.hasPrefix("en-") {
+            return .en_us
+        }
+        if lower == "zh-hant" || lower == "zh_tw" || lower == "zh-tw" || lower == "zh_hk" || lower == "zh-hk" || lower.contains("hant") || lower == "zh" {
+            return .zh_tw
+        }
+        return AppLanguage(rawValue: string)
+    }
 }
 
 enum LocKey {
@@ -115,11 +133,14 @@ final class LocalizationManager {
     static let shared = LocalizationManager()
 
     private let userDefaultsKey = "macTouchControl.appLanguage"
+    private let legacyKey = "macTouchControl.language"
+    private let defaults: UserDefaults
 
     var selectedLanguage: AppLanguage {
         didSet {
-            UserDefaults.standard.set(selectedLanguage.rawValue, forKey: userDefaultsKey)
-            UserDefaults.standard.synchronize()
+            defaults.set(selectedLanguage.rawValue, forKey: userDefaultsKey)
+            defaults.set(selectedLanguage.rawValue, forKey: legacyKey)
+            defaults.synchronize()
         }
     }
 
@@ -130,9 +151,10 @@ final class LocalizationManager {
         return Self.detectSystemLanguage()
     }
 
-    init() {
-        if let saved = UserDefaults.standard.string(forKey: userDefaultsKey),
-           let lang = AppLanguage(rawValue: saved) {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let saved = defaults.string(forKey: userDefaultsKey) ?? defaults.string(forKey: legacyKey)
+        if let lang = AppLanguage.from(string: saved) {
             self.selectedLanguage = lang
         } else {
             // 預設語言為 System (跟隨系統)
