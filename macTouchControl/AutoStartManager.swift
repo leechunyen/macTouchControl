@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var isFirstLaunchCheck = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupApplicationIcon()
         AutoStartManager.shared.evaluateLaunchTrigger()
         AutoStartManager.shared.checkStatus()
 
@@ -88,6 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: NSWindow.didBecomeKeyNotification,
             object: nil
         )
+    }
+
+    /// 設定 App 圖標至 NSApp.applicationIconImage，即刻更新 Dock 圖示（不需等待系統 Dock 重載快取）
+    func setupApplicationIcon() {
+        if let icnsURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: icnsURL) {
+            NSApp.applicationIconImage = image
+        } else if let image = NSImage(named: "AppIcon") {
+            NSApp.applicationIconImage = image
+        }
     }
 
     func registerMainWindow(_ window: NSWindow) {
@@ -104,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             isFirstLaunchCheck = false
             // 使用者手動啟動：正常呈現控制面板視窗與 Dock 圖標
+            setupApplicationIcon()
             NSApp.setActivationPolicy(.regular)
         }
     }
@@ -126,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// 從 Menu Bar 點選「打開控制面板」時調用
     func openControlPanel() {
         // 控制面板開啟時，還原為 .regular 模式，Dock 圖標即時出現
+        setupApplicationIcon()
         NSApp.setActivationPolicy(.regular)
         if let window = mainWindow {
             window.makeKeyAndOrderFront(nil)

@@ -51,11 +51,26 @@ struct ContentView: View {
     }
 
     // MARK: - Header
+    private var appIconImage: NSImage? {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+            return NSImage(contentsOf: url)
+        }
+        return NSImage(named: "AppIcon")
+    }
+
     private var headerView: some View {
-        HStack {
-            Image(systemName: "hand.tap.fill")
-                .font(.system(size: 26))
-                .foregroundColor(.accentColor)
+        HStack(spacing: 12) {
+            if let appIcon = appIconImage {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: "hand.tap.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(.accentColor)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("macTouchControl")

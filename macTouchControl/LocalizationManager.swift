@@ -199,7 +199,7 @@ final class LocalizationManager {
     private func stringForZhTW(_ key: LocKey) -> String {
         switch key {
         case .appSubtitle:
-            return "外接觸控螢幕專用對應工具"
+            return "觸控螢幕工具"
         case .statusActive:
             return "服務運作中"
         case .statusInactive:
@@ -325,7 +325,7 @@ final class LocalizationManager {
         case .unassignedDisplay:
             return "未指定螢幕"
         case .windowTitle:
-            return "macTouchControl - 外接觸控螢幕對應工具"
+            return "macTouchControl - 觸控螢幕工具"
 
         case .autoStartTitle:
             return "開機時自動啟動"
@@ -340,7 +340,7 @@ final class LocalizationManager {
     private func stringForEnUS(_ key: LocKey) -> String {
         switch key {
         case .appSubtitle:
-            return "External Touchscreen Mapping Utility"
+            return "Touchscreen Utility"
         case .statusActive:
             return "Service Active"
         case .statusInactive:
@@ -466,7 +466,7 @@ final class LocalizationManager {
         case .unassignedDisplay:
             return "Unassigned Display"
         case .windowTitle:
-            return "macTouchControl - External Touchscreen Utility"
+            return "macTouchControl - Touchscreen Utility"
 
         case .autoStartTitle:
             return "Launch at Login"
