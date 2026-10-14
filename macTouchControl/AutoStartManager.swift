@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func registerMainWindow(_ window: NSWindow) {
+        guard self.mainWindow !== window else { return }
         self.mainWindow = window
         window.delegate = self
 
@@ -101,10 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.orderOut(nil)
             NSApp.setActivationPolicy(.accessory)
         } else {
-            // 使用者手動雙擊啟動：
-            // 正常呈現控制面板視窗與 Dock 圖標
+            isFirstLaunchCheck = false
+            // 使用者手動啟動：正常呈現控制面板視窗與 Dock 圖標
             NSApp.setActivationPolicy(.regular)
-            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -142,25 +142,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 // MARK: - Window Accessor for SwiftUI
 
-/// 輔助 SwiftUI 視窗捕獲原生 NSWindow 實例以綁定 Delegate
+/// 自訂 NSView 透過 viewDidMoveToWindow 生命週期安全捕獲原生 NSWindow
+final class WindowAccessorView: NSView {
+    var callback: ((NSWindow) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window = window {
+            callback?(window)
+        }
+    }
+}
+
+/// 輔助 SwiftUI 視窗捕獲原生 NSWindow 實例以綁定 Delegate（無佈局遞迴開銷）
 struct WindowAccessor: NSViewRepresentable {
     let callback: (NSWindow) -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window {
-                callback(window)
-            }
-        }
+    func makeNSView(context: Context) -> WindowAccessorView {
+        let view = WindowAccessorView()
+        view.callback = callback
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if let window = nsView.window {
-                callback(window)
-            }
-        }
+    func updateNSView(_ nsView: WindowAccessorView, context: Context) {
+        nsView.callback = callback
     }
 }
