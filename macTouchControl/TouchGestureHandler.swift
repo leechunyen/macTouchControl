@@ -12,16 +12,19 @@ import AppKit
 /// 外接觸控螢幕專用觸控手勢處理引擎
 /// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
 /// 2. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
-/// 3. 滑動絕對防誤觸（Bulletproof Click Lock）：
+/// 3. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：
 ///    - 手勢一旦位移（>= 2.0pt）即刻轉入滑動狀態（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click，嚴禁任何點擊
 ///    - 捲動過程絕對不發送任何未預期的滑鼠事件（嚴禁發送偽造的 leftMouseUp，杜絕瀏覽器誤觸發點擊）
-///    - 捲動活躍工作階段（isScrollSessionActive，滑動後 450ms 內），所有落指與抬起一律鎖定 Click，杜絕煞車或連滑誤開連結
+///    - 白名單事件簽名（synthesizedEventSignature）：只有經過嚴格手勢判定為合法 Tap 的事件才允許通過 CGEventTap，其餘 macOS 底層產生的幽靈 Drag/MouseDown 一律被攔截銷毀
 /// 4. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，可自由切換）
 /// 5. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
 @Observable
 @MainActor
 final class TouchGestureHandler {
     static let shared = TouchGestureHandler()
+
+    /// 合成白名單事件簽名（"TOUC" in hex: 0x544F5543），供 CGEventTap 識別合法點擊並攔截系統幽靈拖曳
+    static let synthesizedEventSignature: Int64 = 0x544F5543
 
     // MARK: - User Settings (預設均為開啟)
 
@@ -476,7 +479,7 @@ final class TouchGestureHandler {
         event.post(tap: .cghidEventTap)
     }
 
-    /// 合成標準左鍵輕點（原子性同步發送，嚴防連續點擊選取文字）
+    /// 合成標準左鍵輕點（原子性同步發送，帶有防誤觸白名單簽名）
     private func synthesizeClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
@@ -499,11 +502,15 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 1)
 
+        // 設置專屬白名單簽名，確保通過 CGEventTap 攔截網
+        down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+        up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }
 
-    /// 合成 Windows 風格長按右鍵選單（原子性同步發送）
+    /// 合成 Windows 風格長按右鍵選單（原子性同步發送，帶有防誤觸白名單簽名）
     private func synthesizeRightClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
@@ -525,6 +532,9 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 1)
 
+        down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+        up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }
@@ -532,12 +542,13 @@ final class TouchGestureHandler {
     private func synthesizeMouseEvent(type: CGEventType, point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         CGWarpMouseCursorPosition(point)
-        let event = CGEvent(
+        guard let event = CGEvent(
             mouseEventSource: nil,
             mouseType: type,
             mouseCursorPosition: point,
             mouseButton: .left
-        )
-        event?.post(tap: .cghidEventTap)
+        ) else { return }
+        event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
+        event.post(tap: .cghidEventTap)
     }
 }

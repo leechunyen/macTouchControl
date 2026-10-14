@@ -20,8 +20,20 @@ final class TouchDeviceManager {
     var lastNormalizedPoint: CGPoint? = nil
     var isRunning: Bool = false
 
+    /// 目前是否有任何外接觸控螢幕正處於手指按壓／接觸中
+    var isAnyTouchActive: Bool {
+        devices.values.contains { $0.isTouching }
+    }
+
+    /// 上次手指離開觸控螢幕的時間戳
+    private(set) var lastTouchReleaseTime: TimeInterval = 0
+
     private var hidManager: IOHIDManager?
     private let gestureHandler = TouchGestureHandler.shared
+
+    // MARK: - Hardware Rogue Event Interceptor (CGEventTap 幽靈事件過濾器)
+    private var eventTapPort: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
 
     // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫，並支援 X/Y 封包原子性合併
     private var deviceStates: [String: DeviceInputState] = [:]
@@ -40,6 +52,9 @@ final class TouchDeviceManager {
 
     func start() {
         guard hidManager == nil else { return }
+
+        // 啟動底層事件攔截器（阻斷系統幽靈拖曳與誤選取文字）
+        setupEventTap()
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         self.hidManager = manager
@@ -83,6 +98,7 @@ final class TouchDeviceManager {
     }
 
     func stop() {
+        tearDownEventTap()
         guard let manager = hidManager else { return }
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -97,6 +113,78 @@ final class TouchDeviceManager {
     func rescan() {
         stop()
         start()
+    }
+
+    // MARK: - CGEventTap 幽靈事件防護盾 (阻斷 macOS 內核產生的誤反白與拖曳)
+
+    func setupEventTap() {
+        guard eventTapPort == nil else { return }
+        guard PermissionManager.shared.isAccessibilityGranted else { return }
+
+        let mask: CGEventMask = (CGEventMask(1) << CGEventType.leftMouseDown.rawValue) |
+                                (CGEventMask(1) << CGEventType.leftMouseDragged.rawValue) |
+                                (CGEventMask(1) << CGEventType.leftMouseUp.rawValue)
+
+        let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { proxy, type, event, refcon -> Unmanaged<CGEvent>? in
+                guard let refcon else { return Unmanaged.passUnretained(event) }
+                let manager = Unmanaged<TouchDeviceManager>.fromOpaque(refcon).takeUnretainedValue()
+
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let port = manager.eventTapPort {
+                        CGEvent.tapEnable(tap: port, enable: true)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // 檢查是否為 macTouchControl 主動合成發送的白名單事件（簽名 0x544F5543 = "TOUC"）
+                let signature = event.getIntegerValueField(.eventSourceUserData)
+                if signature == TouchGestureHandler.synthesizedEventSignature {
+                    // 由本程式經嚴格手勢判定後合法派發的 Tap Click，完全放行
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // 若使用者啟用了平板滑動模式，且目前外接觸控螢幕正處於碰觸中（或碰觸剛結束 150ms 內）：
+                // 該未簽名事件必為 macOS 系統內核 IOHIDFamily 將觸控面板誤當滑鼠所自發產生的幽靈 leftMouseDown / leftMouseDragged / leftMouseUp
+                // 必須在事件鏈頂端徹底攔截並銷毀 (return nil)，徹底杜絕誤選取文字 (Highlight)、誤拖曳檔案/視窗與誤 Click！
+                let isTouchActive = manager.isAnyTouchActive
+                let recentlyReleased = (ProcessInfo.processInfo.systemUptime - manager.lastTouchReleaseTime < 0.15)
+                let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
+
+                if isTabletScroll && (isTouchActive || recentlyReleased) {
+                    // 攔截並銷毀 macOS 系統底層產生的幽靈拖曳與誤點擊！
+                    return nil
+                }
+
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: observer
+        ) else {
+            return
+        }
+
+        self.eventTapPort = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        self.runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func tearDownEventTap() {
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            self.runLoopSource = nil
+        }
+        if let tap = eventTapPort {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            self.eventTapPort = nil
+        }
     }
 
     // MARK: - Device Filtering
@@ -222,6 +310,11 @@ final class TouchDeviceManager {
             self.devices[id] = touchDevice
             self.deviceStates[id] = DeviceInputState()
 
+            // 確保 EventTap 已就緒
+            if self.eventTapPort == nil {
+                self.setupEventTap()
+            }
+
             // 自動為未綁定的新裝置配對預設螢幕
             let mappingStore = MappingStore.shared
             let displayManager = DisplayManager.shared
@@ -321,6 +414,11 @@ final class TouchDeviceManager {
     private func processTouchInput(id: String, state: DeviceInputState, tipChanged: Bool) {
         guard let touchDevice = self.devices[id] else { return }
 
+        // 若 EventTap 尚未啟動（例如啟動後才取得 Accessibility 權限），動態補救建立
+        if self.eventTapPort == nil {
+            self.setupEventTap()
+        }
+
         let displayManager = DisplayManager.shared
         let mappingStore = MappingStore.shared
 
@@ -346,12 +444,16 @@ final class TouchDeviceManager {
         // 核心功能：游標立馬無延遲跳轉至對應螢幕
         CGWarpMouseCursorPosition(targetPoint)
 
-        // 更新即時狀態指示
+        // 更新即時狀態指示與手指釋放時間戳
         self.lastActiveDeviceID = id
         self.lastTouchPoint = targetPoint
         self.lastNormalizedPoint = normPoint
         self.devices[id]?.currentRawX = state.rawX
         self.devices[id]?.currentRawY = state.rawY
+
+        if self.devices[id]?.isTouching == true && !state.isDown {
+            self.lastTouchReleaseTime = ProcessInfo.processInfo.systemUptime
+        }
         self.devices[id]?.isTouching = state.isDown
         self.devices[id]?.lastActiveTime = Date()
 
@@ -372,6 +474,7 @@ final class TouchDeviceManager {
                 mouseCursorPosition: targetPoint,
                 mouseButton: .left
             )
+            event?.setIntegerValueField(.eventSourceUserData, value: TouchGestureHandler.synthesizedEventSignature)
             event?.post(tap: .cghidEventTap)
         }
     }
