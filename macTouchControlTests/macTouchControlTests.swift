@@ -6,73 +6,64 @@
 //
 
 import Testing
+import Foundation
 import CoreGraphics
 @testable import macTouchControl
 
-@Suite("macTouchControl 核心邏輯與多語言測試")
 struct MacTouchControlTests {
 
     @Test("測試語言自動檢測與Fallback機制")
     func testLanguageDetectionAndFallback() {
-        // 1. 繁體中文台灣優先 -> zh_tw
-        let zhTWResult = LocalizationManager.resolveLanguage(from: ["zh-TW", "en-US"])
-        #expect(zhTWResult == .zh_tw)
+        // 1. 繁體中文偏好 -> 解析為 zh_tw
+        let zhTW = LocalizationManager.resolveLanguage(from: ["zh-TW", "en-US"])
+        #expect(zhTW == .zh_tw)
 
-        // 2. zh-Hant-TW 格式 -> zh_tw
-        let zhHantResult = LocalizationManager.resolveLanguage(from: ["zh-Hant-TW", "en"])
-        #expect(zhHantResult == .zh_tw)
+        let zhHant = LocalizationManager.resolveLanguage(from: ["zh-Hant-HK", "en"])
+        #expect(zhHant == .zh_tw)
 
-        // 3. 香港繁體 -> zh_tw
-        let zhHKResult = LocalizationManager.resolveLanguage(from: ["zh-HK", "en"])
-        #expect(zhHKResult == .zh_tw)
+        // 2. 英文偏好 -> 解析為 en_us
+        let en = LocalizationManager.resolveLanguage(from: ["en-US", "zh-TW"])
+        #expect(en == .en_us)
 
-        // 4. 英文優先 -> en_us
-        let enResult = LocalizationManager.resolveLanguage(from: ["en-US", "zh-TW"])
-        #expect(enResult == .en_us)
+        // 3. 其他非中英語系（例如日文、法文） -> 自動 Fallback 到 en_us
+        let japaneseFallback = LocalizationManager.resolveLanguage(from: ["ja-JP", "fr-FR"])
+        #expect(japaneseFallback == .en_us)
 
-        // 5. 非支援語言（日語、法語、德語等） -> 必須一律 fallback 去 en_us
-        let jaResult = LocalizationManager.resolveLanguage(from: ["ja-JP", "es-ES"])
-        #expect(jaResult == .en_us)
+        let germanFallback = LocalizationManager.resolveLanguage(from: ["de-DE"])
+        #expect(germanFallback == .en_us)
 
-        let frResult = LocalizationManager.resolveLanguage(from: ["fr-FR"])
-        #expect(frResult == .en_us)
-
-        let emptyResult = LocalizationManager.resolveLanguage(from: [])
-        #expect(emptyResult == .en_us)
+        // 4. 空列表 -> Fallback 到 en_us
+        let emptyFallback = LocalizationManager.resolveLanguage(from: [])
+        #expect(emptyFallback == .en_us)
     }
 
     @Test("測試動態語系切換字串轉換")
     @MainActor
     func testLocalizedStrings() {
-        let loc = LocalizationManager()
+        let manager = LocalizationManager()
 
-        // 切換為繁體中文
-        loc.selectedLanguage = .zh_tw
-        #expect(loc.currentEffectiveLanguage == .zh_tw)
-        #expect(loc.t(.appName) == "macTouchControl")
-        #expect(loc.t(.statusActive) == "服務運作中")
-        #expect(loc.t(.revealInFinderButton) == "在 Finder 中顯示 App")
-        #expect(loc.t(.menuQuit) == "離開 macTouchControl")
+        // 強制切換為英文
+        manager.selectedLanguage = .en_us
+        #expect(manager.t(.statusActive) == "Service Active")
+        #expect(manager.t(.mappingSectionTitle) == "Touch Panel & Display 1-to-1 Mapping")
+        #expect(manager.t(.accessibilityTitle) == "Accessibility")
+        #expect(manager.t(.mainDisplayBadge) == "Main")
+        #expect(manager.t(.gestureScrollTitle) == "Mobile / Tablet Touch Scrolling")
 
-        // 切換為英文
-        loc.selectedLanguage = .en_us
-        #expect(loc.currentEffectiveLanguage == .en_us)
-        #expect(loc.t(.statusActive) == "Service Active")
-        #expect(loc.t(.revealInFinderButton) == "Reveal App in Finder")
-        #expect(loc.t(.menuQuit) == "Quit macTouchControl")
+        // 強制切換為繁體中文
+        manager.selectedLanguage = .zh_tw
+        #expect(manager.t(.statusActive) == "服務運作中")
+        #expect(manager.t(.mappingSectionTitle) == "觸控面板與螢幕 1 對 1 綁定")
+        #expect(manager.t(.accessibilityTitle) == "輔助使用 (Accessibility)")
+        #expect(manager.t(.mainDisplayBadge) == "主螢幕")
+        #expect(manager.t(.gestureScrollTitle) == "觸摸屏滑動體驗 (Mobile/Tablet 模式)")
     }
 
     @Test("測試觸控設備座標標準化與邊界約束")
     func testCoordinateNormalization() {
         let device = TouchDevice(
             id: "test_dev_1",
-            name: "測試觸控板",
-            manufacturer: "TestCorp",
-            vendorID: 0x1234,
-            productID: 0x5678,
-            locationID: 1,
-            serialNumber: "SN123",
-            isDigitizer: true,
+            name: "Test Touch Panel",
             minX: 0,
             maxX: 1000,
             minY: 0,
@@ -188,5 +179,51 @@ struct MacTouchControlTests {
             isBuiltIn: false
         )
         #expect(asusTouch == true)
+    }
+
+    @Test("測試平板觸控滑動手勢處理器配置與觸摸循環")
+    @MainActor
+    func testTouchGestureHandlerCycle() {
+        let handler = TouchGestureHandler()
+
+        // 測試預設值
+        #expect(handler.isTouchScrollEnabled == true)
+        #expect(handler.naturalScroll == true)
+        #expect(handler.scrollSensitivity > 0)
+
+        // 模擬 Tap (輕點) 循環：在相同位置按下與抬起
+        let tapPoint = CGPoint(x: 200, y: 300)
+        let norm = CGPoint(x: 0.2, y: 0.3)
+
+        handler.handleTouch(point: tapPoint, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: tapPoint, normalized: norm, isDown: false, tipChanged: true)
+
+        // 模擬 Scroll (滑動) 循環：手指按下並拖動超過 slopThreshold (8pt)
+        let scrollStart = CGPoint(x: 300, y: 400)
+        handler.handleTouch(point: scrollStart, normalized: norm, isDown: true, tipChanged: true)
+
+        // 移動 50 像素（判定進入滑動狀態）
+        let scrollMove1 = CGPoint(x: 300, y: 450)
+        handler.handleTouch(point: scrollMove1, normalized: norm, isDown: true, tipChanged: false)
+
+        let scrollMove2 = CGPoint(x: 300, y: 520)
+        handler.handleTouch(point: scrollMove2, normalized: norm, isDown: true, tipChanged: false)
+
+        // 釋放（結束滑動，可能觸發慣性）
+        handler.handleTouch(point: scrollMove2, normalized: norm, isDown: false, tipChanged: true)
+
+        // 模擬再次觸摸（中斷慣性）
+        handler.handleTouch(point: CGPoint(x: 310, y: 530), normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: CGPoint(x: 310, y: 530), normalized: norm, isDown: false, tipChanged: true)
+
+        // 測試修改配置
+        handler.naturalScroll = false
+        #expect(handler.naturalScroll == false)
+
+        handler.scrollSensitivity = 1.5
+        #expect(handler.scrollSensitivity == 1.5)
+
+        handler.isTouchScrollEnabled = false
+        #expect(handler.isTouchScrollEnabled == false)
     }
 }

@@ -3,7 +3,7 @@
 //  macTouchControl
 //
 
-import SwiftUI
+import Foundation
 import Observation
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -26,7 +26,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 }
 
 enum LocKey {
-    // Header
+    // App Bar & General
     case appName
     case appSubtitle
     case statusActive
@@ -75,6 +75,10 @@ enum LocKey {
     case comingSoonBadge
     case gestureScrollTitle
     case gestureScrollDesc
+    case naturalScrollTitle
+    case naturalScrollDesc
+    case scrollSensitivityTitle
+    case menuToggleTouchScroll
     case gestureNotificationCenterTitle
     case gestureNotificationCenterDesc
     case gestureDockTitle
@@ -235,15 +239,23 @@ final class LocalizationManager {
             return "已綁定: \(list)"
 
         case .gesturesSectionTitle:
-            return "觸控手勢設定 (即將推出)"
+            return "觸控手勢與滑動 (Touch Gestures)"
         case .nextPhaseBadge:
-            return "下階段功能"
+            return "已啟用"
         case .comingSoonBadge:
             return "即將推出"
         case .gestureScrollTitle:
-            return "單指 / 雙指滑動滾動 (Scroll)"
+            return "觸摸屏滑動體驗 (Mobile/Tablet 模式)"
         case .gestureScrollDesc:
-            return "在觸控面板上拖曳時模擬滑鼠滾輪，滑動長頁面更順暢"
+            return "如同手機或平板直接在螢幕上滑動網頁與列表，支援慣性滾動與輕點點擊"
+        case .naturalScrollTitle:
+            return "自然滑動方向 (Natural Scrolling)"
+        case .naturalScrollDesc:
+            return "內容直接跟隨手指滑動方向移動（Direct Manipulation）"
+        case .scrollSensitivityTitle:
+            return "滑動靈敏度"
+        case .menuToggleTouchScroll:
+            return "平板觸控滑動模式"
         case .gestureNotificationCenterTitle:
             return "右緣向內滑動開通知中心"
         case .gestureNotificationCenterDesc:
@@ -356,15 +368,23 @@ final class LocalizationManager {
             return "Mapped: \(list)"
 
         case .gesturesSectionTitle:
-            return "Touch Gestures (Coming Soon)"
+            return "Touch Gestures & Scrolling"
         case .nextPhaseBadge:
-            return "Next Phase"
+            return "Active"
         case .comingSoonBadge:
             return "Coming Soon"
         case .gestureScrollTitle:
-            return "One/Two-Finger Scrolling"
+            return "Mobile / Tablet Touch Scrolling"
         case .gestureScrollDesc:
-            return "Simulate mouse wheel scrolling when dragging on touch panel for smoother browsing."
+            return "Swipe directly on touchscreen to scroll web pages and lists like an iPad, with momentum and tap-to-click"
+        case .naturalScrollTitle:
+            return "Natural Scroll Direction"
+        case .naturalScrollDesc:
+            return "Content directly follows finger movement (Direct Manipulation)"
+        case .scrollSensitivityTitle:
+            return "Scroll Sensitivity"
+        case .menuToggleTouchScroll:
+            return "Tablet Touch Scrolling"
         case .gestureNotificationCenterTitle:
             return "Swipe In from Right for Notification Center"
         case .gestureNotificationCenterDesc:

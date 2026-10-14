@@ -12,6 +12,7 @@ struct MenuBarContentView: View {
     @Environment(TouchDeviceManager.self) private var touchManager
     @Environment(MappingStore.self) private var mappingStore
     @Environment(LocalizationManager.self) private var loc
+    @Environment(TouchGestureHandler.self) private var gestureHandler
 
     var body: some View {
         // 運作狀態
@@ -36,6 +37,17 @@ struct MenuBarContentView: View {
         }
 
         Divider()
+
+        // 平板風格觸控滑動開關
+        Button {
+            gestureHandler.isTouchScrollEnabled.toggle()
+        } label: {
+            if gestureHandler.isTouchScrollEnabled {
+                Text("✓ \(loc.t(.menuToggleTouchScroll))")
+            } else {
+                Text("   \(loc.t(.menuToggleTouchScroll))")
+            }
+        }
 
         Button(loc.t(.menuOpenPanel)) {
             openMainWindow()

@@ -20,7 +20,7 @@ final class TouchDeviceManager: @unchecked Sendable {
     var isRunning: Bool = false
 
     private var hidManager: IOHIDManager?
-    private let gestureHandler = TouchGestureHandler()
+    private let gestureHandler = TouchGestureHandler.shared
 
     // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫
     private var deviceStates: [String: DeviceInputState] = [:]
@@ -261,7 +261,6 @@ final class TouchDeviceManager: @unchecked Sendable {
         var state = deviceStates[id] ?? DeviceInputState()
         var coordinateUpdated = false
         var tipChanged = false
-        var oldDown = state.isDown
 
         if page == kHIDPage_GenericDesktop {
             if usage == kHIDUsage_GD_X {
@@ -275,7 +274,6 @@ final class TouchDeviceManager: @unchecked Sendable {
             if usage == kHIDUsage_Dig_TipSwitch {
                 let newDown = (intVal > 0)
                 if newDown != state.isDown {
-                    oldDown = state.isDown
                     state.isDown = newDown
                     tipChanged = true
                 }
@@ -284,7 +282,6 @@ final class TouchDeviceManager: @unchecked Sendable {
             if usage == 1 { // Button 1
                 let newDown = (intVal > 0)
                 if newDown != state.isDown {
-                    oldDown = state.isDown
                     state.isDown = newDown
                     tipChanged = true
                 }
@@ -333,67 +330,25 @@ final class TouchDeviceManager: @unchecked Sendable {
             self.devices[id]?.isTouching = state.isDown
             self.devices[id]?.lastActiveTime = Date()
 
-            // 發送合成滑鼠事件
-            self.synthesizeMouseEvent(targetPoint: targetPoint, tipChanged: tipChanged, oldDown: oldDown, isDown: state.isDown)
-
-            // 手勢追蹤（預留擴充）
-            let phase: TouchPhase
-            if tipChanged {
-                phase = state.isDown ? .began : .ended
-            } else {
-                phase = .moved
-            }
-            let sample = TouchSample(
+            // 交付手勢與觸控事件引擎（支援 Mobile/Tablet 觸摸屏滑動、輕點與慣性滾動體驗）
+            self.gestureHandler.handleTouch(
                 point: targetPoint,
                 normalized: normPoint,
-                timestamp: ProcessInfo.processInfo.systemUptime,
-                phase: phase
+                isDown: state.isDown,
+                tipChanged: tipChanged
             )
-            self.gestureHandler.processTouchSample(sample)
-        }
-    }
 
-    private func synthesizeMouseEvent(targetPoint: CGPoint, tipChanged: Bool, oldDown: Bool, isDown: Bool) {
-        guard PermissionManager.shared.isAccessibilityGranted else { return }
-
-        if tipChanged {
-            if isDown && !oldDown {
-                // 觸碰開始：發送 LeftMouseDown
+            // 若設備支援近距懸停（未觸碰且未改變狀態），發送 MouseMoved
+            if !state.isDown && !tipChanged {
+                guard PermissionManager.shared.isAccessibilityGranted else { return }
                 let event = CGEvent(
                     mouseEventSource: nil,
-                    mouseType: .leftMouseDown,
-                    mouseCursorPosition: targetPoint,
-                    mouseButton: .left
-                )
-                event?.post(tap: .cghidEventTap)
-            } else if !isDown && oldDown {
-                // 觸碰結束：發送 LeftMouseUp
-                let event = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: .leftMouseUp,
+                    mouseType: .mouseMoved,
                     mouseCursorPosition: targetPoint,
                     mouseButton: .left
                 )
                 event?.post(tap: .cghidEventTap)
             }
-        } else if isDown {
-            // 按下並移動：發送 LeftMouseDragged
-            let event = CGEvent(
-                mouseEventSource: nil,
-                mouseType: .leftMouseDragged,
-                mouseCursorPosition: targetPoint,
-                mouseButton: .left
-            )
-            event?.post(tap: .cghidEventTap)
-        } else {
-            // 懸停移動（如果設備支援）：發送 MouseMoved
-            let event = CGEvent(
-                mouseEventSource: nil,
-                mouseType: .mouseMoved,
-                mouseCursorPosition: targetPoint,
-                mouseButton: .left
-            )
-            event?.post(tap: .cghidEventTap)
         }
     }
 }

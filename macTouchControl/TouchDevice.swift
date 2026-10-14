@@ -28,6 +28,34 @@ struct TouchDevice: Identifiable, Hashable {
     var isTouching: Bool = false
     var lastActiveTime: Date? = nil
 
+    init(
+        id: String,
+        name: String,
+        manufacturer: String = "",
+        vendorID: Int = 0,
+        productID: Int = 0,
+        locationID: Int? = nil,
+        serialNumber: String? = nil,
+        isDigitizer: Bool = true,
+        minX: Double = 0,
+        maxX: Double = 32767,
+        minY: Double = 0,
+        maxY: Double = 32767
+    ) {
+        self.id = id
+        self.name = name
+        self.manufacturer = manufacturer
+        self.vendorID = vendorID
+        self.productID = productID
+        self.locationID = locationID
+        self.serialNumber = serialNumber
+        self.isDigitizer = isDigitizer
+        self.minX = minX
+        self.maxX = maxX
+        self.minY = minY
+        self.maxY = maxY
+    }
+
     var isActiveRecently: Bool {
         guard let lastActiveTime else { return false }
         return Date().timeIntervalSince(lastActiveTime) < 1.5

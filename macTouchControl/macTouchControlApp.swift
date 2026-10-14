@@ -15,6 +15,7 @@ struct macTouchControlApp: App {
     @State private var touchManager = TouchDeviceManager.shared
     @State private var mappingStore = MappingStore.shared
     @State private var localizationManager = LocalizationManager.shared
+    @State private var gestureHandler = TouchGestureHandler.shared
 
     init() {
         // App 啟動時先檢查是否具備所有需要的權限
@@ -29,8 +30,9 @@ struct macTouchControlApp: App {
                 .environment(touchManager)
                 .environment(mappingStore)
                 .environment(localizationManager)
+                .environment(gestureHandler)
                 .onAppear {
-                    // 啟動時若缺少權限，確保面板浮至最前方便使用者授權
+                    // 啟動時若缺少權限，確保面板浮至最前方方便使用者授權
                     if !permissionManager.isAllGranted {
                         NSApp.activate(ignoringOtherApps: true)
                     }
@@ -46,6 +48,7 @@ struct macTouchControlApp: App {
                 .environment(touchManager)
                 .environment(mappingStore)
                 .environment(localizationManager)
+                .environment(gestureHandler)
         }
     }
 }

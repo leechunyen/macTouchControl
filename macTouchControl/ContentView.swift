@@ -12,6 +12,7 @@ struct ContentView: View {
     @Environment(TouchDeviceManager.self) private var touchManager
     @Environment(MappingStore.self) private var mappingStore
     @Environment(LocalizationManager.self) private var loc
+    @Environment(TouchGestureHandler.self) private var gestureHandler
 
     @State private var isPermissionSectionExpanded: Bool? = nil
     @State private var isGesturesSectionExpanded: Bool = false
@@ -457,12 +458,12 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Text(loc.t(.nextPhaseBadge))
+                    Text(gestureHandler.isTouchScrollEnabled ? loc.t(.nextPhaseBadge) : loc.t(.comingSoonBadge))
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color.purple.opacity(0.12))
-                        .foregroundColor(.purple)
+                        .background(gestureHandler.isTouchScrollEnabled ? Color.green.opacity(0.12) : Color.purple.opacity(0.12))
+                        .foregroundColor(gestureHandler.isTouchScrollEnabled ? .green : .purple)
                         .cornerRadius(6)
 
                     Image(systemName: isGesturesSectionExpanded ? "chevron.up" : "chevron.down")
@@ -475,16 +476,86 @@ struct ContentView: View {
             .buttonStyle(.plain)
 
             if isGesturesSectionExpanded {
-                VStack(spacing: 8) {
-                    gesturePreviewRow(
-                        title: loc.t(.gestureScrollTitle),
-                        description: loc.t(.gestureScrollDesc),
-                        icon: "arrow.up.and.down.circle",
-                        comingSoonBadge: loc.t(.comingSoonBadge)
-                    )
+                VStack(spacing: 12) {
+                    // 1. Tablet 風格滑動開關（已完成功能）
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .center) {
+                            Image(systemName: "hand.draw")
+                                .font(.system(size: 20))
+                                .foregroundColor(.accentColor)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(loc.t(.gestureScrollTitle))
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                                Text(loc.t(.gestureScrollDesc))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Toggle("", isOn: Binding<Bool>(
+                                get: { gestureHandler.isTouchScrollEnabled },
+                                set: { gestureHandler.isTouchScrollEnabled = $0 }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+
+                        if gestureHandler.isTouchScrollEnabled {
+                            Divider()
+
+                            HStack {
+                                Text(loc.t(.naturalScrollTitle))
+                                    .font(.subheadline)
+                                Text(loc.t(.naturalScrollDesc))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+
+                                Spacer()
+
+                                Toggle("", isOn: Binding<Bool>(
+                                    get: { gestureHandler.naturalScroll },
+                                    set: { gestureHandler.naturalScroll = $0 }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                            }
+                            .padding(.leading, 28)
+
+                            HStack {
+                                Text(loc.t(.scrollSensitivityTitle))
+                                    .font(.subheadline)
+
+                                Spacer()
+
+                                Slider(
+                                    value: Binding<Double>(
+                                        get: { gestureHandler.scrollSensitivity },
+                                        set: { gestureHandler.scrollSensitivity = $0 }
+                                    ),
+                                    in: 0.5...2.5,
+                                    step: 0.1
+                                )
+                                .frame(width: 140)
+
+                                Text(String(format: "%.1fx", gestureHandler.scrollSensitivity))
+                                    .font(.caption)
+                                    .monospacedDigit()
+                                    .frame(width: 38, alignment: .trailing)
+                            }
+                            .padding(.leading, 28)
+                        }
+                    }
+                    .padding(12)
+                    .background(gestureHandler.isTouchScrollEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
 
                     Divider()
 
+                    // 2. 右側邊緣向內滑開通知中心（即將推出）
                     gesturePreviewRow(
                         title: loc.t(.gestureNotificationCenterTitle),
                         description: loc.t(.gestureNotificationCenterDesc),
@@ -494,6 +565,7 @@ struct ContentView: View {
 
                     Divider()
 
+                    // 3. 底部邊緣向內滑顯示 Dock（即將推出）
                     gesturePreviewRow(
                         title: loc.t(.gestureDockTitle),
                         description: loc.t(.gestureDockDesc),
