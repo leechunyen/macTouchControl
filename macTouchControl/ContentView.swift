@@ -2,58 +2,544 @@
 //  ContentView.swift
 //  macTouchControl
 //
-//  Created by LeeChunYen on 14/10/2026.
-//
 
 import SwiftUI
-import SwiftData
+import AppKit
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(PermissionManager.self) private var permissionManager
+    @Environment(DisplayManager.self) private var displayManager
+    @Environment(TouchDeviceManager.self) private var touchManager
+    @Environment(MappingStore.self) private var mappingStore
+    @Environment(LocalizationManager.self) private var loc
+
+    @State private var isPermissionSectionExpanded: Bool? = nil
+    @State private var isGesturesSectionExpanded: Bool = false
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
+        VStack(spacing: 0) {
+            // 頂部應用程式狀態列
+            headerView
+
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    // 1. 權限檢查與配置卡片（具備權限時自動預設折疊）
+                    permissionStatusSection
+
+                    // 2. 觸控面板與螢幕 1-to-1 綁定卡片
+                    deviceMappingSection
+
+                    // 3. 螢幕資訊一覽
+                    displaysOverviewSection
+
+                    // 4. 未來手勢功能預覽區（支援折疊）
+                    upcomingGesturesSection
+                }
+                .padding(20)
+            }
+        }
+        .frame(minWidth: 720, idealWidth: 760, minHeight: 660, idealHeight: 700)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    // MARK: - Header
+    private var headerView: some View {
+        HStack {
+            Image(systemName: "hand.tap.fill")
+                .font(.system(size: 26))
+                .foregroundColor(.accentColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(loc.t(.appName))
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text(loc.t(.appSubtitle))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            // 語言切換選擇器
+            Picker("", selection: Binding<AppLanguage>(
+                get: { loc.selectedLanguage },
+                set: { loc.selectedLanguage = $0 }
+            )) {
+                ForEach(AppLanguage.allCases) { lang in
+                    Text(lang.displayName).tag(lang)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    // MARK: - Permission Section
+    private var isPermissionsExpanded: Bool {
+        isPermissionSectionExpanded ?? !permissionManager.isAllGranted
+    }
+
+    private var permissionStatusSection: some View {
+        VStack(alignment: .leading, spacing: isPermissionsExpanded ? 14 : 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isPermissionSectionExpanded = !isPermissionsExpanded
+                }
+            } label: {
+                HStack {
+                    Label(loc.t(.permissionSectionTitle), systemImage: "lock.shield")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Spacer()
+
+                    if permissionManager.isAllGranted {
+                        Text(loc.t(.permissionAllGranted))
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    } else {
+                        Text(loc.t(.permissionMissingWarning))
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+
+                    Image(systemName: isPermissionsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isPermissionsExpanded {
+                VStack(spacing: 10) {
+                    // 輔助使用
+                    permissionRow(
+                        title: loc.t(.accessibilityTitle),
+                        description: loc.t(.accessibilityDesc),
+                        isGranted: permissionManager.isAccessibilityGranted,
+                        onRequest: {
+                            permissionManager.requestAccessibility()
+                        }
+                    )
+
+                    Divider()
+
+                    // 輸入監控
+                    permissionRow(
+                        title: loc.t(.inputMonitoringTitle),
+                        description: loc.t(.inputMonitoringDesc),
+                        isGranted: permissionManager.isInputMonitoringGranted,
+                        onRequest: {
+                            permissionManager.requestInputMonitoring()
+                        }
+                    )
+                }
+                .padding(14)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
+
+                // 關鍵拖曳授權按鈕與說明
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "questionmark.folder")
+                        .font(.system(size: 20))
+                        .foregroundColor(.accentColor)
+                        .padding(.top, 2)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(loc.t(.dragHelperTitle))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        Text(loc.t(.dragHelperDesc))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        permissionManager.revealAppInFinder()
                     } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                        Label(loc.t(.revealInFinderButton), systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(12)
+                .background(Color.accentColor.opacity(0.08))
+                .cornerRadius(8)
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        )
+    }
+
+    private func permissionRow(title: String, description: String, isGranted: Bool, onRequest: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: isGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundColor(isGranted ? .green : .red)
+                .font(.system(size: 20))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if isGranted {
+                Text(loc.t(.permissionGrantedBadge))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.12))
+                    .cornerRadius(6)
+            } else {
+                Button(loc.t(.permissionRequestButton)) {
+                    onRequest()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    // MARK: - Device Mapping Section
+    private var deviceMappingSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(loc.t(.mappingSectionTitle), systemImage: "display.2")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    touchManager.rescan()
+                    displayManager.refreshDisplays()
+                } label: {
+                    Label(loc.t(.rescanButton), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if displayManager.isMirroringActive {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.on.rectangle")
+                        .foregroundColor(.blue)
+                    Text(loc.t(.mirrorModeNotice))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(12)
+                .background(Color.blue.opacity(0.08))
+                .cornerRadius(8)
+            }
+
+            let deviceList = Array(touchManager.devices.values)
+
+            if deviceList.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "cable.connector.slash")
+                        .font(.system(size: 36))
+                        .foregroundColor(.secondary)
+                    Text(loc.t(.noDeviceDetectedTitle))
+                        .font(.headline)
+                    Text(loc.t(.noDeviceDetectedDesc))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 480)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 36)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
+            } else {
+                ForEach(deviceList) { device in
+                    deviceCard(device: device)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        )
+    }
+
+    private func deviceCard(device: TouchDevice) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: device.isDigitizer ? "hand.draw" : "hand.tap")
+                    .font(.system(size: 18))
+                    .foregroundColor(.accentColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name)
+                        .font(.headline)
+                    Text("\(device.manufacturer.isEmpty ? "HID" : device.manufacturer) - \(device.name)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if device.isActiveRecently {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                        Text(loc.t(.touchSignalActive))
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.12))
+                    .cornerRadius(8)
+                }
+            }
+
+            Divider()
+
+            // 綁定設定選擇器
+            HStack(spacing: 12) {
+                Text(loc.t(.mappedDisplayLabel))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                let currentTarget = mappingStore.targetDisplay(for: device.id, availableDisplays: displayManager.displays)
+
+                Picker("", selection: Binding<CGDirectDisplayID>(
+                    get: { currentTarget?.id ?? displayManager.mainDisplay?.id ?? 0 },
+                    set: { newID in
+                        if let selectedDisplay = displayManager.displays.first(where: { $0.id == newID }) {
+                            mappingStore.bind(deviceID: device.id, deviceName: device.name, display: selectedDisplay)
+                        }
+                    }
+                )) {
+                    ForEach(displayManager.displays) { display in
+                        Text(display.displayNameWithDetails(loc: loc)).tag(display.id)
                     }
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                .labelsHidden()
+                .frame(maxWidth: 320)
+
+                Spacer()
+
+                // 測試跳轉按鈕
+                Button(loc.t(.testWarpButton)) {
+                    if let target = currentTarget ?? displayManager.mainDisplay {
+                        let center = CGPoint(x: target.bounds.midX, y: target.bounds.midY)
+                        CGWarpMouseCursorPosition(center)
                     }
                 }
+                .buttonStyle(.bordered)
             }
-        } detail: {
-            Text("Select an item")
-        }
-    }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+            // 即時偵測資訊狀態
+            if device.lastActiveTime != nil {
+                let curX = device.currentRawX
+                let curY = device.currentRawY
+                let norm = device.normalizedCoordinate(rawX: curX, rawY: curY)
+                HStack(spacing: 16) {
+                    Text(loc.t(.liveCoordinates(Int(curX), Int(curY))))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+                    Text(loc.t(.panelRatio(norm.x, norm.y)))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(device.isActiveRecently ? Color.accentColor : Color.clear, lineWidth: 1.5)
+        )
     }
-}
 
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+    // MARK: - Displays Overview Section
+    private var displaysOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(loc.t(.displaysSectionTitle(displayManager.displays.count)), systemImage: "tv")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                ForEach(displayManager.displays) { display in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: display.isBuiltin ? "laptopcomputer" : "display")
+                                .foregroundColor(.accentColor)
+                            Text(display.name)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            if display.isMain {
+                                Text(loc.t(.mainDisplayBadge))
+                                    .font(.system(size: 9, weight: .bold))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.blue.opacity(0.15))
+                                    .foregroundColor(.blue)
+                                    .cornerRadius(4)
+                            }
+                        }
+
+                        Text(loc.t(.resolution(Int(display.pixelWidth), Int(display.pixelHeight))))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        Text(loc.t(.origin(Int(display.bounds.origin.x), Int(display.bounds.origin.y))))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        // 顯示綁定到此螢幕的觸控設備
+                        let mappedDevices = touchManager.devices.values.filter { dev in
+                            mappingStore.targetDisplay(for: dev.id, availableDisplays: displayManager.displays)?.id == display.id
+                        }
+                        if !mappedDevices.isEmpty {
+                            Text(loc.t(.mappedDeviceList(mappedDevices.map(\.name).joined(separator: ", "))))
+                                .font(.caption2)
+                                .foregroundColor(.accentColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Upcoming Gestures Section
+    private var upcomingGesturesSection: some View {
+        VStack(alignment: .leading, spacing: isGesturesSectionExpanded ? 14 : 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isGesturesSectionExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Label(loc.t(.gesturesSectionTitle), systemImage: "sparkles")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Spacer()
+
+                    Text(loc.t(.nextPhaseBadge))
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.12))
+                        .foregroundColor(.purple)
+                        .cornerRadius(6)
+
+                    Image(systemName: isGesturesSectionExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isGesturesSectionExpanded {
+                VStack(spacing: 8) {
+                    gesturePreviewRow(
+                        title: loc.t(.gestureScrollTitle),
+                        description: loc.t(.gestureScrollDesc),
+                        icon: "arrow.up.and.down.circle",
+                        comingSoonBadge: loc.t(.comingSoonBadge)
+                    )
+
+                    Divider()
+
+                    gesturePreviewRow(
+                        title: loc.t(.gestureNotificationCenterTitle),
+                        description: loc.t(.gestureNotificationCenterDesc),
+                        icon: "sidebar.right",
+                        comingSoonBadge: loc.t(.comingSoonBadge)
+                    )
+
+                    Divider()
+
+                    gesturePreviewRow(
+                        title: loc.t(.gestureDockTitle),
+                        description: loc.t(.gestureDockDesc),
+                        icon: "dock.rectangle",
+                        comingSoonBadge: loc.t(.comingSoonBadge)
+                    )
+                }
+                .padding(14)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
+            }
+        }
+        .padding(16)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        )
+    }
+
+    private func gesturePreviewRow(title: String, description: String, icon: String, comingSoonBadge: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundColor(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Text(comingSoonBadge)
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.secondary.opacity(0.12))
+                .foregroundColor(.secondary)
+                .cornerRadius(6)
+        }
+    }
 }

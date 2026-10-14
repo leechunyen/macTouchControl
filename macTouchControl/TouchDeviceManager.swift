@@ -1,0 +1,399 @@
+//
+//  TouchDeviceManager.swift
+//  macTouchControl
+//
+
+import SwiftUI
+import AppKit
+import CoreGraphics
+import IOKit.hid
+import Observation
+
+@Observable
+final class TouchDeviceManager: @unchecked Sendable {
+    static let shared = TouchDeviceManager()
+
+    var devices: [String: TouchDevice] = [:]
+    var lastActiveDeviceID: String? = nil
+    var lastTouchPoint: CGPoint? = nil
+    var lastNormalizedPoint: CGPoint? = nil
+    var isRunning: Bool = false
+
+    private var hidManager: IOHIDManager?
+    private let gestureHandler = TouchGestureHandler()
+
+    // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫
+    private var deviceStates: [String: DeviceInputState] = [:]
+
+    private struct DeviceInputState {
+        var rawX: Double = 0
+        var rawY: Double = 0
+        var isDown: Bool = false
+    }
+
+    init() {
+        start()
+    }
+
+    deinit {
+        stop()
+    }
+
+    func start() {
+        guard hidManager == nil else { return }
+
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        self.hidManager = manager
+
+        // 配對所有 Digitizer (觸控螢幕、數位板、觸控板) 及 Pointer 裝置
+        let matchingCriteria: [[String: Any]] = [
+            [kIOHIDDeviceUsagePageKey as String: kHIDPage_Digitizer],
+            [
+                kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+                kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Pointer
+            ]
+        ]
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matchingCriteria as CFArray)
+
+        let context = Unmanaged.passUnretained(self).toOpaque()
+
+        // 註冊裝置連線回呼
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, result, sender, device in
+            guard let context else { return }
+            let manager = Unmanaged<TouchDeviceManager>.fromOpaque(context).takeUnretainedValue()
+            manager.handleDeviceConnected(device)
+        }, context)
+
+        // 註冊裝置拔除回呼
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, { context, result, sender, device in
+            guard let context else { return }
+            let manager = Unmanaged<TouchDeviceManager>.fromOpaque(context).takeUnretainedValue()
+            manager.handleDeviceRemoved(device)
+        }, context)
+
+        // 註冊即時數值輸入回呼
+        IOHIDManagerRegisterInputValueCallback(manager, { context, result, sender, value in
+            guard let context else { return }
+            let manager = Unmanaged<TouchDeviceManager>.fromOpaque(context).takeUnretainedValue()
+            manager.handleInputValue(value)
+        }, context)
+
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        let openStatus = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        self.isRunning = (openStatus == kIOReturnSuccess)
+    }
+
+    func stop() {
+        guard let manager = hidManager else { return }
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        self.hidManager = nil
+        self.isRunning = false
+        Task { @MainActor in
+            self.devices.removeAll()
+            self.deviceStates.removeAll()
+        }
+    }
+
+    func rescan() {
+        stop()
+        start()
+    }
+
+    // MARK: - Device Filtering
+
+    /// 判斷裝置是否為可調用與綁定的外接觸控螢幕／數位板，排除 Mac 內建鍵盤觸控板與常規輸入設備
+    static func isEligibleTouchDevice(name: String, manufacturer: String, vendorID: Int, isBuiltIn: Bool) -> Bool {
+        // 1. 內建硬體一律排除
+        if isBuiltIn {
+            return false
+        }
+
+        let lowerName = name.lowercased()
+        let lowerManufacturer = manufacturer.lowercased()
+
+        // 2. 排除所有 Apple 原生設備 (Vendor ID 0x05AC = 1452)
+        // Apple 設備均為 Mac 內建鍵盤/觸控板、Magic Trackpad、Magic Mouse 等，非外接觸控螢幕
+        if vendorID == 0x05AC || lowerManufacturer.contains("apple") {
+            return false
+        }
+
+        // 3. 排除名稱中帶有 Internal / Trackpad / Keyboard / Touch Bar 等關鍵字的設備
+        if lowerName.contains("internal") ||
+           lowerName.contains("trackpad") ||
+           lowerName.contains("keyboard") ||
+           lowerName.contains("touch bar") {
+            return false
+        }
+
+        // 4. 排除純滑鼠設備（名稱含 mouse 且不含 touch / digitizer / screen）
+        if lowerName.contains("mouse") && !lowerName.contains("touch") && !lowerName.contains("digitizer") && !lowerName.contains("screen") {
+            return false
+        }
+
+        return true
+    }
+
+    // MARK: - Device Lifecycle
+
+    private func deviceID(for device: IOHIDDevice) -> String {
+        let vendorID = (IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? NSNumber)?.intValue ?? 0
+        let productID = (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue ?? 0
+        let locationID = (IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber)?.intValue
+        let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String
+
+        let locationPart = locationID != nil ? "\(locationID!)" : "0"
+        let serialPart = serial ?? locationPart
+        return "\(vendorID)_\(productID)_\(serialPart)"
+    }
+
+    private func handleDeviceConnected(_ device: IOHIDDevice) {
+        let defaultName = LocalizationManager.shared.t(.defaultTouchDeviceName)
+        let name = (IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String) ?? defaultName
+        let manufacturer = (IOHIDDeviceGetProperty(device, kIOHIDManufacturerKey as CFString) as? String) ?? ""
+        let vendorID = (IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? NSNumber)?.intValue ?? 0
+        let productID = (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue ?? 0
+        let locationID = (IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber)?.intValue
+        let serial = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String
+
+        // 檢查 Built-In 屬性
+        var isBuiltIn = false
+        if let b = IOHIDDeviceGetProperty(device, kIOHIDBuiltInKey as CFString) as? Bool {
+            isBuiltIn = b
+        } else if let num = IOHIDDeviceGetProperty(device, kIOHIDBuiltInKey as CFString) as? NSNumber {
+            isBuiltIn = num.boolValue
+        } else if let str = IOHIDDeviceGetProperty(device, "Built-In" as CFString) as? String {
+            isBuiltIn = (str.lowercased() == "true")
+        }
+
+        // 若不是可調用/可映射的外接觸控設備，則直接忽略不予註冊與顯示
+        guard Self.isEligibleTouchDevice(name: name, manufacturer: manufacturer, vendorID: vendorID, isBuiltIn: isBuiltIn) else {
+            return
+        }
+
+        let id = deviceID(for: device)
+
+        var minX: Double = 0
+        var maxX: Double = 32767
+        var minY: Double = 0
+        var maxY: Double = 32767
+
+        // 讀取裝置 Elements 以校準座標範圍
+        if let elements = IOHIDDeviceCopyMatchingElements(device, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement] {
+            for element in elements {
+                let page = Int(IOHIDElementGetUsagePage(element))
+                let usage = Int(IOHIDElementGetUsage(element))
+
+                if page == kHIDPage_GenericDesktop {
+                    if usage == kHIDUsage_GD_X {
+                        let eMin = Double(IOHIDElementGetLogicalMin(element))
+                        let eMax = Double(IOHIDElementGetLogicalMax(element))
+                        if eMax > eMin {
+                            minX = eMin
+                            maxX = eMax
+                        }
+                    } else if usage == kHIDUsage_GD_Y {
+                        let eMin = Double(IOHIDElementGetLogicalMin(element))
+                        let eMax = Double(IOHIDElementGetLogicalMax(element))
+                        if eMax > eMin {
+                            minY = eMin
+                            maxY = eMax
+                        }
+                    }
+                }
+            }
+        }
+
+        let touchDevice = TouchDevice(
+            id: id,
+            name: name,
+            manufacturer: manufacturer,
+            vendorID: vendorID,
+            productID: productID,
+            locationID: locationID,
+            serialNumber: serial,
+            isDigitizer: true,
+            minX: minX,
+            maxX: maxX,
+            minY: minY,
+            maxY: maxY
+        )
+
+        Task { @MainActor in
+            self.devices[id] = touchDevice
+            self.deviceStates[id] = DeviceInputState()
+
+            // 自動為未綁定的新裝置配對預設螢幕
+            let mappingStore = MappingStore.shared
+            let displayManager = DisplayManager.shared
+            if mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays) == nil {
+                // 若有外接螢幕則嘗試配對第一個外接，否則使用主螢幕
+                let targetDisplay = displayManager.displays.first(where: { !$0.isBuiltin }) ?? displayManager.mainDisplay
+                if let targetDisplay {
+                    mappingStore.bind(deviceID: id, deviceName: name, display: targetDisplay)
+                }
+            }
+        }
+    }
+
+    private func handleDeviceRemoved(_ device: IOHIDDevice) {
+        let id = deviceID(for: device)
+        Task { @MainActor in
+            self.devices.removeValue(forKey: id)
+            self.deviceStates.removeValue(forKey: id)
+            if self.lastActiveDeviceID == id {
+                self.lastActiveDeviceID = nil
+            }
+        }
+    }
+
+    // MARK: - Input Value Handling
+
+    private func handleInputValue(_ value: IOHIDValue) {
+        let element = IOHIDValueGetElement(value)
+        let device = IOHIDElementGetDevice(element)
+        let id = deviceID(for: device)
+
+        let page = Int(IOHIDElementGetUsagePage(element))
+        let usage = Int(IOHIDElementGetUsage(element))
+        let intVal = IOHIDValueGetIntegerValue(value)
+
+        var state = deviceStates[id] ?? DeviceInputState()
+        var coordinateUpdated = false
+        var tipChanged = false
+        var oldDown = state.isDown
+
+        if page == kHIDPage_GenericDesktop {
+            if usage == kHIDUsage_GD_X {
+                state.rawX = Double(intVal)
+                coordinateUpdated = true
+            } else if usage == kHIDUsage_GD_Y {
+                state.rawY = Double(intVal)
+                coordinateUpdated = true
+            }
+        } else if page == kHIDPage_Digitizer {
+            if usage == kHIDUsage_Dig_TipSwitch {
+                let newDown = (intVal > 0)
+                if newDown != state.isDown {
+                    oldDown = state.isDown
+                    state.isDown = newDown
+                    tipChanged = true
+                }
+            }
+        } else if page == kHIDPage_Button {
+            if usage == 1 { // Button 1
+                let newDown = (intVal > 0)
+                if newDown != state.isDown {
+                    oldDown = state.isDown
+                    state.isDown = newDown
+                    tipChanged = true
+                }
+            }
+        }
+
+        deviceStates[id] = state
+
+        guard coordinateUpdated || tipChanged else { return }
+
+        // 取得該觸控裝置綁定的目標螢幕
+        Task { @MainActor in
+            guard let touchDevice = self.devices[id] else { return }
+
+            let displayManager = DisplayManager.shared
+            let mappingStore = MappingStore.shared
+
+            // 計算標準化座標 (0.0 ... 1.0)
+            let normPoint = touchDevice.normalizedCoordinate(rawX: state.rawX, rawY: state.rawY)
+
+            // 尋找綁定的目標螢幕（若鏡像中或未自訂則使用主螢幕）
+            let targetDisplay: DisplayInfo?
+            if displayManager.isMirroringActive {
+                targetDisplay = displayManager.mainDisplay
+            } else {
+                targetDisplay = mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays) ?? displayManager.mainDisplay
+            }
+
+            guard let display = targetDisplay else { return }
+
+            // 映射至目標螢幕的全域 CoreGraphics 座標
+            let targetBounds = display.bounds
+            let screenX = targetBounds.origin.x + normPoint.x * targetBounds.width
+            let screenY = targetBounds.origin.y + normPoint.y * targetBounds.height
+            let targetPoint = CGPoint(x: screenX, y: screenY)
+
+            // 核心功能：游標立馬跳轉至對應螢幕
+            CGWarpMouseCursorPosition(targetPoint)
+
+            // 更新即時狀態指示
+            self.lastActiveDeviceID = id
+            self.lastTouchPoint = targetPoint
+            self.lastNormalizedPoint = normPoint
+            self.devices[id]?.currentRawX = state.rawX
+            self.devices[id]?.currentRawY = state.rawY
+            self.devices[id]?.isTouching = state.isDown
+            self.devices[id]?.lastActiveTime = Date()
+
+            // 發送合成滑鼠事件
+            self.synthesizeMouseEvent(targetPoint: targetPoint, tipChanged: tipChanged, oldDown: oldDown, isDown: state.isDown)
+
+            // 手勢追蹤（預留擴充）
+            let phase: TouchPhase
+            if tipChanged {
+                phase = state.isDown ? .began : .ended
+            } else {
+                phase = .moved
+            }
+            let sample = TouchSample(
+                point: targetPoint,
+                normalized: normPoint,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                phase: phase
+            )
+            self.gestureHandler.processTouchSample(sample)
+        }
+    }
+
+    private func synthesizeMouseEvent(targetPoint: CGPoint, tipChanged: Bool, oldDown: Bool, isDown: Bool) {
+        guard PermissionManager.shared.isAccessibilityGranted else { return }
+
+        if tipChanged {
+            if isDown && !oldDown {
+                // 觸碰開始：發送 LeftMouseDown
+                let event = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: .leftMouseDown,
+                    mouseCursorPosition: targetPoint,
+                    mouseButton: .left
+                )
+                event?.post(tap: .cghidEventTap)
+            } else if !isDown && oldDown {
+                // 觸碰結束：發送 LeftMouseUp
+                let event = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: .leftMouseUp,
+                    mouseCursorPosition: targetPoint,
+                    mouseButton: .left
+                )
+                event?.post(tap: .cghidEventTap)
+            }
+        } else if isDown {
+            // 按下並移動：發送 LeftMouseDragged
+            let event = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: targetPoint,
+                mouseButton: .left
+            )
+            event?.post(tap: .cghidEventTap)
+        } else {
+            // 懸停移動（如果設備支援）：發送 MouseMoved
+            let event = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .mouseMoved,
+                mouseCursorPosition: targetPoint,
+                mouseButton: .left
+            )
+            event?.post(tap: .cghidEventTap)
+        }
+    }
+}
