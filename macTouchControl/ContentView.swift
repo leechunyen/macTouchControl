@@ -441,8 +441,20 @@ struct ContentView: View {
     // MARK: - Displays Overview Section
     private var displaysOverviewSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(loc.t(.displaysSectionTitle(displayManager.displays.count)), systemImage: "tv")
-                .font(.headline)
+            HStack {
+                Label(loc.t(.displaysSectionTitle(displayManager.displays.count)), systemImage: "tv")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    DisplayIdentifier.shared.identifyAllDisplays()
+                } label: {
+                    Label(loc.t(.identifyDisplaysButton), systemImage: "eye")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+            }
 
             HStack(spacing: 12) {
                 ForEach(displayManager.displays) { display in
@@ -462,6 +474,18 @@ struct ContentView: View {
                                     .foregroundColor(.blue)
                                     .cornerRadius(4)
                             }
+
+                            Spacer()
+
+                            Button {
+                                DisplayIdentifier.shared.identify(display: display)
+                            } label: {
+                                Image(systemName: "eye")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help(loc.t(.identifyDisplayTooltip))
                         }
 
                         Text(loc.t(.resolution(Int(display.pixelWidth), Int(display.pixelHeight))))

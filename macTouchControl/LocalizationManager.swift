@@ -87,6 +87,8 @@ enum LocKey {
     case resolution(Int, Int)
     case origin(Int, Int)
     case mappedDeviceList(String)
+    case identifyDisplaysButton
+    case identifyDisplayTooltip
 
     // Gestures Section
     case gesturesSectionTitle
@@ -270,6 +272,10 @@ final class LocalizationManager {
             return "原點: (\(x), \(y))"
         case .mappedDeviceList(let list):
             return "已綁定裝置: \(list)"
+        case .identifyDisplaysButton:
+            return "識別螢幕"
+        case .identifyDisplayTooltip:
+            return "在實體螢幕上顯示識別號碼與名稱"
 
         case .gesturesSectionTitle:
             return "觸控手勢與捲動體驗 (Touch Gestures)"
@@ -413,6 +419,10 @@ final class LocalizationManager {
             return "Origin: (\(x), \(y))"
         case .mappedDeviceList(let list):
             return "Mapped Devices: \(list)"
+        case .identifyDisplaysButton:
+            return "Identify"
+        case .identifyDisplayTooltip:
+            return "Show identification badge on screen"
 
         case .gesturesSectionTitle:
             return "Touch Gestures & Scrolling"

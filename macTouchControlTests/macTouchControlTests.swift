@@ -82,12 +82,14 @@ struct MacTouchControlTests {
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
         #expect(manager.t(.longPressRightClickTitle) == "Long Press for Right-Click (Windows Style)")
         #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press for Right-Click (Windows Style)")
+        #expect(manager.t(.identifyDisplaysButton) == "Identify")
 
         // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
         manager.selectedLanguage = .zh_tw
         #expect(manager.t(.appSubtitle) == "觸控螢幕工具")
         #expect(manager.t(.disconnectedDisplay) == "已中斷連線")
         #expect(manager.t(.statusActive) == "服務運作中")
+        #expect(manager.t(.identifyDisplaysButton) == "識別螢幕")
         #expect(manager.t(.mappingSectionTitle) == "觸控面板與螢幕 1 對 1 綁定")
         #expect(manager.t(.rescanButton) == "重新掃描裝置")
         #expect(manager.t(.defaultTouchDeviceName) == "觸控裝置")

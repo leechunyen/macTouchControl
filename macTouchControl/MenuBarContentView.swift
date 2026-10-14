@@ -89,6 +89,10 @@ struct MenuBarContentView: View {
             displayManager.refreshDisplays()
         }
 
+        Button(loc.t(.identifyDisplaysButton)) {
+            DisplayIdentifier.shared.identifyAllDisplays()
+        }
+
         Button(loc.t(.menuRevealFinder)) {
             permissionManager.revealAppInFinder()
         }
