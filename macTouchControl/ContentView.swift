@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(MappingStore.self) private var mappingStore
     @Environment(LocalizationManager.self) private var loc
     @Environment(TouchGestureHandler.self) private var gestureHandler
+    @Environment(AutoStartManager.self) private var autoStartManager
 
     @State private var isPermissionSectionExpanded: Bool? = nil
     @State private var isGesturesSectionExpanded: Bool = false
@@ -43,6 +44,9 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, idealWidth: 760, minHeight: 660, idealHeight: 700)
         .background(Color(NSColor.windowBackgroundColor))
+        .background(WindowAccessor { window in
+            AppDelegate.shared.registerMainWindow(window)
+        })
     }
 
     // MARK: - Header
@@ -63,6 +67,18 @@ struct ContentView: View {
 
             Spacer()
 
+            // 開機自動啟動 (Auto Start) 開關
+            Toggle(isOn: Binding<Bool>(
+                get: { autoStartManager.isAutoStartEnabled },
+                set: { autoStartManager.setAutoStart(enabled: $0) }
+            )) {
+                Text(loc.t(.autoStartTitle))
+                    .font(.subheadline)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .padding(.trailing, 10)
+
             // 語言切換選擇器
             Picker("", selection: Binding<AppLanguage>(
                 get: { loc.selectedLanguage },
@@ -73,7 +89,7 @@ struct ContentView: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 170)
+            .frame(width: 140)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

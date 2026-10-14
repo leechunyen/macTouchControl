@@ -8,6 +8,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import AppKit
 @testable import macTouchControl
 
 struct MacTouchControlTests {
@@ -317,5 +318,40 @@ struct MacTouchControlTests {
         let tapPt = CGPoint(x: 400, y: 400)
         handler.handleTouch(point: tapPt, normalized: norm, isDown: true, tipChanged: true)
         handler.handleTouch(point: tapPt, normalized: norm, isDown: false, tipChanged: true)
+    }
+
+    @Test("測試開機自動啟動管理器與本地化字串")
+    @MainActor
+    func testAutoStartManagerAndLifecycle() {
+        let autoStart = AutoStartManager.shared
+        autoStart.checkStatus()
+        autoStart.evaluateLaunchTrigger()
+
+        // 驗證本地化字串
+        let loc = LocalizationManager.shared
+        loc.selectedLanguage = .en_us
+        #expect(loc.t(.autoStartTitle) == "Launch at Login")
+        #expect(loc.t(.menuToggleAutoStart) == "Launch at Login (Auto Start)")
+
+        loc.selectedLanguage = .zh_tw
+        #expect(loc.t(.autoStartTitle) == "開機時自動啟動")
+        #expect(loc.t(.menuToggleAutoStart) == "開機時自動啟動 (Auto Start)")
+
+        // 驗證視窗關閉時委派行為：隱藏視窗、切換為 .accessory 模式以隱藏 Dock 圖標
+        let testWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 200),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let appDelegate = AppDelegate.shared
+        appDelegate.registerMainWindow(testWindow)
+        let shouldClose = appDelegate.windowShouldClose(testWindow)
+        #expect(shouldClose == false)
+        #expect(NSApp.activationPolicy() == .accessory)
+
+        // 驗證從選單列重新開啟控制面板時，切換為 .regular 模式並顯示 Dock 圖標
+        appDelegate.openControlPanel()
+        #expect(NSApp.activationPolicy() == .regular)
     }
 }

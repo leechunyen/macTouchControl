@@ -102,6 +102,11 @@ enum LocKey {
     case defaultTouchDeviceName
     case unassignedDisplay
     case windowTitle
+
+    // Auto Start / Settings
+    case autoStartTitle
+    case autoStartDesc
+    case menuToggleAutoStart
 }
 
 @Observable
@@ -299,6 +304,13 @@ final class LocalizationManager {
             return "未指定螢幕"
         case .windowTitle:
             return "macTouchControl - 外接觸控螢幕對應工具"
+
+        case .autoStartTitle:
+            return "開機時自動啟動"
+        case .autoStartDesc:
+            return "登入時自動在選單列常駐運行，不自動彈出控制面板"
+        case .menuToggleAutoStart:
+            return "開機時自動啟動 (Auto Start)"
         }
     }
 
@@ -433,6 +445,13 @@ final class LocalizationManager {
             return "Unassigned Display"
         case .windowTitle:
             return "macTouchControl - External Touchscreen Utility"
+
+        case .autoStartTitle:
+            return "Launch at Login"
+        case .autoStartDesc:
+            return "Automatically start in menu bar upon login without opening the control panel"
+        case .menuToggleAutoStart:
+            return "Launch at Login (Auto Start)"
         }
     }
 }

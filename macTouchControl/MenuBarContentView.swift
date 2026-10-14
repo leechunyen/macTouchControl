@@ -13,6 +13,7 @@ struct MenuBarContentView: View {
     @Environment(MappingStore.self) private var mappingStore
     @Environment(LocalizationManager.self) private var loc
     @Environment(TouchGestureHandler.self) private var gestureHandler
+    @Environment(AutoStartManager.self) private var autoStartManager
 
     var body: some View {
         // 運作狀態
@@ -60,6 +61,17 @@ struct MenuBarContentView: View {
             }
         }
 
+        // 開機自動啟動開關 (Auto Start)
+        Button {
+            autoStartManager.setAutoStart(enabled: !autoStartManager.isAutoStartEnabled)
+        } label: {
+            if autoStartManager.isAutoStartEnabled {
+                Text("✓ \(loc.t(.menuToggleAutoStart))")
+            } else {
+                Text("   \(loc.t(.menuToggleAutoStart))")
+            }
+        }
+
         Button(loc.t(.menuOpenPanel)) {
             openMainWindow()
         }
@@ -99,13 +111,6 @@ struct MenuBarContentView: View {
     }
 
     private func openMainWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title.contains("macTouchControl") }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            if let window = NSApp.windows.first {
-                window.makeKeyAndOrderFront(nil)
-            }
-        }
+        AppDelegate.shared.openControlPanel()
     }
 }
