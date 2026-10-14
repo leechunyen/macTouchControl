@@ -73,6 +73,8 @@ struct MacTouchControlTests {
 
         // 強制切換為英文
         manager.selectedLanguage = .en_us
+        #expect(manager.t(.appSubtitle) == "Touchscreen Utility")
+        #expect(manager.t(.disconnectedDisplay) == "Disconnected")
         #expect(manager.t(.statusActive) == "Service Active")
         #expect(manager.t(.mappingSectionTitle) == "Touch Panel & Display 1-to-1 Mapping")
         #expect(manager.t(.accessibilityTitle) == "Accessibility")
@@ -83,6 +85,8 @@ struct MacTouchControlTests {
 
         // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
         manager.selectedLanguage = .zh_tw
+        #expect(manager.t(.appSubtitle) == "觸控螢幕工具")
+        #expect(manager.t(.disconnectedDisplay) == "已中斷連線")
         #expect(manager.t(.statusActive) == "服務運作中")
         #expect(manager.t(.mappingSectionTitle) == "觸控面板與螢幕 1 對 1 綁定")
         #expect(manager.t(.rescanButton) == "重新掃描裝置")
@@ -150,10 +154,15 @@ struct MacTouchControlTests {
         #expect(matched?.id == 101)
         #expect(matched?.name == "外接觸控螢幕 A")
 
+        // 測試螢幕拔掉時：儲存的映射設定保持不被清除，僅回傳 nil
+        #expect(store.targetDisplay(for: "dev_touch_1", availableDisplays: []) == nil)
+        #expect(store.mappings["dev_touch_1"] != nil)
+        #expect(store.mappings["dev_touch_1"]?.targetDisplayName == "外接觸控螢幕 A")
+
         // 測試螢幕重新連線後 DisplayID 變更但名稱相符的模糊修復匹配
         let reconnectedDisplay = DisplayInfo(
             id: 202,
-            name: "外接觸控螢幕 A",
+            name: "  外接觸控螢幕 A  ",
             bounds: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
             pixelWidth: 1920,
             pixelHeight: 1080,
@@ -163,6 +172,7 @@ struct MacTouchControlTests {
         )
         let fallbackMatched = store.targetDisplay(for: "dev_touch_1", availableDisplays: [reconnectedDisplay])
         #expect(fallbackMatched?.id == 202)
+        #expect(store.mappings["dev_touch_1"]?.targetDisplayID == 202)
 
         // 測試解除綁定
         store.unbind(deviceID: "dev_touch_1")

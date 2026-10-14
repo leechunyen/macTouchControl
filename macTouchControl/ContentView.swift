@@ -370,10 +370,21 @@ struct ContentView: View {
                     .fontWeight(.medium)
 
                 let currentTarget = mappingStore.targetDisplay(for: device.id, availableDisplays: displayManager.displays)
+                let savedMapping = mappingStore.mappings[device.id]
+                let isTargetOffline = currentTarget == nil && savedMapping != nil
 
                 Picker("", selection: Binding<CGDirectDisplayID>(
-                    get: { currentTarget?.id ?? displayManager.mainDisplay?.id ?? 0 },
+                    get: {
+                        if let currentTarget {
+                            return currentTarget.id
+                        }
+                        if let savedMapping {
+                            return savedMapping.targetDisplayID
+                        }
+                        return displayManager.mainDisplay?.id ?? 0
+                    },
                     set: { newID in
+                        // 僅當使用者選取現存連線中的螢幕時才寫入新綁定，避免離線佔位符或 SwiftUI 狀態重算時覆蓋原先設定
                         if let selectedDisplay = displayManager.displays.first(where: { $0.id == newID }) {
                             mappingStore.bind(deviceID: device.id, deviceName: device.name, display: selectedDisplay)
                         }
@@ -381,6 +392,10 @@ struct ContentView: View {
                 )) {
                     ForEach(displayManager.displays) { display in
                         Text(display.displayNameWithDetails(loc: loc)).tag(display.id)
+                    }
+                    if let savedMapping, isTargetOffline {
+                        Text("\(savedMapping.targetDisplayName) (\(loc.t(.disconnectedDisplay)))")
+                            .tag(savedMapping.targetDisplayID)
                     }
                 }
                 .labelsHidden()

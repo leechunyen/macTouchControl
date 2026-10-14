@@ -351,10 +351,10 @@ final class TouchDeviceManager {
                 self.setupEventTap()
             }
 
-            // 自動為未綁定的新裝置配對預設螢幕
+            // 只有在此裝置完全沒有任何儲存的綁定記錄時，才為新裝置自動配對預設螢幕；若已曾綁定過則保持記錄，等待螢幕接回
             let mappingStore = MappingStore.shared
             let displayManager = DisplayManager.shared
-            if mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays) == nil {
+            if mappingStore.mappings[id] == nil {
                 // 若有外接螢幕則嘗試配對第一個外接，否則使用主螢幕
                 let targetDisplay = displayManager.displays.first(where: { !$0.isBuiltin }) ?? displayManager.mainDisplay
                 if let targetDisplay {

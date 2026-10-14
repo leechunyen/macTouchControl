@@ -74,12 +74,35 @@ final class MappingStore {
             return exactMatch
         }
 
-        // 2. 若螢幕重新插拔導致 DisplayID 變更，則以螢幕名稱模糊匹配
+        // 2. 若螢幕重新插拔導致 DisplayID 變更，則以螢幕名稱精確匹配
         if let nameMatch = availableDisplays.first(where: { $0.name == mapping.targetDisplayName }) {
             // 同步更新最新 DisplayID
             mappings[deviceID]?.targetDisplayID = nameMatch.id
             saveMappings()
             return nameMatch
+        }
+
+        // 3. 容錯匹配：去除前後空白、忽略大小寫匹配
+        let trimmedTarget = mapping.targetDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !trimmedTarget.isEmpty, let looseMatch = availableDisplays.first(where: {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmedTarget
+        }) {
+            mappings[deviceID]?.targetDisplayID = looseMatch.id
+            mappings[deviceID]?.targetDisplayName = looseMatch.name
+            saveMappings()
+            return looseMatch
+        }
+
+        // 4. 外接螢幕模糊匹配（非內建螢幕，名稱互相包含）
+        let nonBuiltinDisplays = availableDisplays.filter { !$0.isBuiltin }
+        if !trimmedTarget.isEmpty, let partialMatch = nonBuiltinDisplays.first(where: {
+            let lower = $0.name.lowercased()
+            return lower.contains(trimmedTarget) || trimmedTarget.contains(lower)
+        }) {
+            mappings[deviceID]?.targetDisplayID = partialMatch.id
+            mappings[deviceID]?.targetDisplayName = partialMatch.name
+            saveMappings()
+            return partialMatch
         }
 
         return nil

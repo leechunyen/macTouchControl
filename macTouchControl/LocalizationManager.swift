@@ -119,6 +119,7 @@ enum LocKey {
     // Device defaults
     case defaultTouchDeviceName
     case unassignedDisplay
+    case disconnectedDisplay
     case windowTitle
 
     // Auto Start / Settings
@@ -324,6 +325,8 @@ final class LocalizationManager {
             return "觸控裝置"
         case .unassignedDisplay:
             return "未指定螢幕"
+        case .disconnectedDisplay:
+            return "已中斷連線"
         case .windowTitle:
             return "macTouchControl - 觸控螢幕工具"
 
@@ -465,6 +468,8 @@ final class LocalizationManager {
             return "Touch Device"
         case .unassignedDisplay:
             return "Unassigned Display"
+        case .disconnectedDisplay:
+            return "Disconnected"
         case .windowTitle:
             return "macTouchControl - Touchscreen Utility"
 

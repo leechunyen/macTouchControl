@@ -32,7 +32,15 @@ struct MenuBarContentView: View {
         } else {
             ForEach(deviceList) { device in
                 let targetDisplay = mappingStore.targetDisplay(for: device.id, availableDisplays: displayManager.displays)
-                let displayName = targetDisplay?.name ?? loc.t(.unassignedDisplay)
+                let displayName: String = {
+                    if let targetDisplay {
+                        return targetDisplay.name
+                    } else if let saved = mappingStore.mappings[device.id] {
+                        return "\(saved.targetDisplayName) (\(loc.t(.disconnectedDisplay)))"
+                    } else {
+                        return loc.t(.unassignedDisplay)
+                    }
+                }()
                 Text("📱 \(device.name) ➔ 🖥️ \(displayName)")
             }
         }

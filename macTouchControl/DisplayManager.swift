@@ -119,6 +119,9 @@ final class DisplayManager {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshDisplays()
+                // 外接螢幕熱插拔時，macOS 解析 EDID 與螢幕名稱可能稍有數百毫秒延遲，進行二次確認刷新
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                self?.refreshDisplays()
             }
         }
     }
