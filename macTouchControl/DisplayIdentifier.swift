@@ -10,7 +10,7 @@ import AppKit
 final class DisplayIdentifier {
     static let shared = DisplayIdentifier()
 
-    private var activeWindows: [NSWindow] = []
+    private var activeWindows: [NSPanel] = []
     private var dismissTimer: Timer?
 
     /// 同步在所有偵測到的實體螢幕中央彈出大號標籤卡片
@@ -39,13 +39,13 @@ final class DisplayIdentifier {
         let windowsToClose = activeWindows
         activeWindows.removeAll()
 
-        for window in windowsToClose {
+        for panel in windowsToClose {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.25
-                window.animator().alphaValue = 0.0
+                panel.animator().alphaValue = 0.0
             } completionHandler: {
-                window.orderOut(nil)
-                window.close()
+                panel.orderOut(nil)
+                panel.contentView = nil
             }
         }
     }
@@ -65,18 +65,22 @@ final class DisplayIdentifier {
         let originY = screen.frame.midY - (cardHeight / 2)
         let frameRect = NSRect(x: originX, y: originY, width: cardWidth, height: cardHeight)
 
-        let window = NSWindow(
+        let panel = NSPanel(
             contentRect: frameRect,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .floating
-        window.ignoresMouseEvents = true
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        window.hasShadow = true
+        // 關鍵：Swift ARC 環境下必須設為 false，避免 AppKit close 時觸發 double-release 崩潰
+        panel.isReleasedWhenClosed = false
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.ignoresMouseEvents = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.hasShadow = true
 
         let mappedDeviceNames = TouchDeviceManager.shared.devices.values
             .filter { dev in
@@ -91,16 +95,16 @@ final class DisplayIdentifier {
         )
 
         let hostingView = NSHostingView(rootView: rootView)
-        window.contentView = hostingView
-        window.alphaValue = 0.0
-        window.orderFrontRegardless()
+        panel.contentView = hostingView
+        panel.alphaValue = 0.0
+        panel.orderFrontRegardless()
 
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
-            window.animator().alphaValue = 1.0
+            panel.animator().alphaValue = 1.0
         }
 
-        activeWindows.append(window)
+        activeWindows.append(panel)
     }
 
     private func scheduleDismissal() {
