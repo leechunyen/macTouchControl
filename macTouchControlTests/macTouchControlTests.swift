@@ -262,4 +262,25 @@ struct MacTouchControlTests {
         handler.scrollSensitivity = 1.0
         handler.isLongPressRightClickEnabled = true
     }
+
+    @Test("測試關閉長按右鍵時的狀態與靈敏度調節")
+    @MainActor
+    func testDisabledRightClickAndSensitivityRange() {
+        let handler = TouchGestureHandler()
+        handler.isLongPressRightClickEnabled = false
+        #expect(handler.isLongPressRightClickEnabled == false)
+
+        handler.scrollSensitivity = 2.5
+        #expect(handler.scrollSensitivity == 2.5)
+        #expect(UserDefaults.standard.double(forKey: "macTouchControl.scrollSensitivity") == 2.5)
+
+        let holdPoint = CGPoint(x: 200, y: 200)
+        let norm = CGPoint(x: 0.2, y: 0.2)
+        handler.handleTouch(point: holdPoint, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: holdPoint, normalized: norm, isDown: false, tipChanged: true)
+
+        // 復原預設
+        handler.scrollSensitivity = 1.0
+        handler.isLongPressRightClickEnabled = true
+    }
 }

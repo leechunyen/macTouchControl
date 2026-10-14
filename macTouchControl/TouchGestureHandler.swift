@@ -12,12 +12,13 @@ import AppKit
 /// 外接觸控螢幕專用觸控手勢處理引擎
 /// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
 /// 2. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
-/// 3. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：
+/// 3. 精確浮點次像素輸出（1:1 True Pixel Scroll & Sensitivity）：直接填寫 fixedPtDelta 與 pointDelta，突破 macOS 預設縮水 10 倍之限制，速度拉條完全真實生效，絲滑流暢不卡頓
+/// 4. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：
 ///    - 手勢一旦位移（>= 2.0pt）即刻轉入滑動狀態（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click，嚴禁任何點擊
 ///    - 捲動過程絕對不發送任何未預期的滑鼠事件（嚴禁發送偽造的 leftMouseUp，杜絕瀏覽器誤觸發點擊）
 ///    - 白名單事件簽名（synthesizedEventSignature）：只有經過嚴格手勢判定為合法 Tap 的事件才允許通過 CGEventTap，其餘 macOS 底層產生的幽靈 Drag/MouseDown 一律被攔截銷毀
-/// 4. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，可自由切換）
-/// 5. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
+/// 5. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，關閉時藉由 EventTap 100% 阻斷硬體幽靈右鍵）
+/// 6. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
 @Observable
 @MainActor
 final class TouchGestureHandler {
@@ -42,7 +43,7 @@ final class TouchGestureHandler {
         }
     }
 
-    /// 滑動靈敏度倍率
+    /// 滑動靈敏度倍率（直接作用於浮點捲動點數）
     var scrollSensitivity: Double = 1.0 {
         didSet {
             UserDefaults.standard.set(scrollSensitivity, forKey: "macTouchControl.scrollSensitivity")
@@ -53,6 +54,9 @@ final class TouchGestureHandler {
     var isLongPressRightClickEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isLongPressRightClickEnabled, forKey: "macTouchControl.longPressRightClickEnabled")
+            if !isLongPressRightClickEnabled {
+                cancelLongPressTimer()
+            }
         }
     }
 
@@ -200,12 +204,12 @@ final class TouchGestureHandler {
             maxDisplacement: 0
         )
 
-        // 僅在非連續捲動冷卻時才排程長按右鍵，避免連續滑動閱覽時誤觸發右鍵選單
+        // 僅在開啟長按右鍵且非連續捲動冷卻時才排程長按右鍵
         if isLongPressRightClickEnabled && !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
                 if case .pending(let startPoint, _, _, let maxDisp) = self.gestureState {
-                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
+                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive && self.isLongPressRightClickEnabled {
                         self.gestureState = .longPressTriggered(point: startPoint)
                         self.synthesizeRightClick(at: startPoint)
                     }
@@ -398,12 +402,12 @@ final class TouchGestureHandler {
             return
         }
 
-        let stepX = Int32(momentumVx * 0.016)
-        let stepY = Int32(momentumVy * 0.016)
+        let stepX = momentumVx * 0.016
+        let stepY = momentumVy * 0.016
 
-        if stepX != 0 || stepY != 0 {
+        if abs(stepX) > 0.1 || abs(stepY) > 0.1 {
             lastScrollTimestamp = ProcessInfo.processInfo.systemUptime
-            postMomentumScrollEvent(deltaX: stepX, deltaY: stepY, phase: .changed)
+            postMomentumScrollEvent(deltaX: CGFloat(stepX), deltaY: CGFloat(stepY), phase: .changed)
         }
     }
 
@@ -434,16 +438,13 @@ final class TouchGestureHandler {
         }
 
         let sign: CGFloat = naturalScroll ? 1.0 : -1.0
-        let totalY = deltaY * sign * scrollSensitivity + fractionalRemainderY
-        let totalX = deltaX * sign * scrollSensitivity + fractionalRemainderX
+        let totalY = deltaY * sign * CGFloat(scrollSensitivity) + fractionalRemainderY
+        let totalX = deltaX * sign * CGFloat(scrollSensitivity) + fractionalRemainderX
 
-        let intDy = Int32(totalY)
-        let intDx = Int32(totalX)
+        fractionalRemainderY = 0
+        fractionalRemainderX = 0
 
-        fractionalRemainderY = totalY - CGFloat(intDy)
-        fractionalRemainderX = totalX - CGFloat(intDx)
-
-        if phase == .changed && intDy == 0 && intDx == 0 {
+        if phase == .changed && abs(totalY) < 0.1 && abs(totalX) < 0.1 {
             return
         }
 
@@ -451,31 +452,45 @@ final class TouchGestureHandler {
             scrollWheelEvent2Source: nil,
             units: .pixel,
             wheelCount: 2,
-            wheel1: intDy,
-            wheel2: intDx,
+            wheel1: Int32(round(totalY)),
+            wheel2: Int32(round(totalX)),
             wheel3: 0
         ) else { return }
 
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+
+        // 核心關鍵：直接賦予精確浮點像素值，突破 CoreGraphics 預設縮水 10 倍的限制，徹底實現 1:1 精準跟手與速度拉條完全生效！
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(totalY))
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: Double(totalX))
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(round(totalY)))
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(round(totalX)))
+
         event.post(tap: .cghidEventTap)
     }
 
     /// 發送雙向慣性捲動事件
-    private func postMomentumScrollEvent(deltaX: Int32, deltaY: Int32, phase: NSEvent.Phase) {
+    private func postMomentumScrollEvent(deltaX: CGFloat, deltaY: CGFloat, phase: NSEvent.Phase) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
             wheelCount: 2,
-            wheel1: deltaY,
-            wheel2: deltaX,
+            wheel1: Int32(round(deltaY)),
+            wheel2: Int32(round(deltaX)),
             wheel3: 0
         ) else { return }
 
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(phase.rawValue))
+
+        // 核心關鍵：平滑衰減的精確浮點像素值
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(deltaY))
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: Double(deltaX))
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(round(deltaY)))
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(round(deltaX)))
+
         event.post(tap: .cghidEventTap)
     }
 
@@ -513,6 +528,7 @@ final class TouchGestureHandler {
     /// 合成 Windows 風格長按右鍵選單（原子性同步發送，帶有防誤觸白名單簽名）
     private func synthesizeRightClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
+        guard isLongPressRightClickEnabled else { return }
 
         CGWarpMouseCursorPosition(point)
 

@@ -53,7 +53,7 @@ final class TouchDeviceManager {
     func start() {
         guard hidManager == nil else { return }
 
-        // 啟動底層事件攔截器（阻斷系統幽靈拖曳與誤選取文字）
+        // 啟動底層事件攔截器（阻斷系統幽靈拖曳、誤選取文字與非預期右鍵）
         setupEventTap()
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -92,7 +92,7 @@ final class TouchDeviceManager {
             manager.handleInputValue(value)
         }, context)
 
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         let openStatus = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.isRunning = (openStatus == kIOReturnSuccess)
     }
@@ -100,7 +100,7 @@ final class TouchDeviceManager {
     func stop() {
         tearDownEventTap()
         guard let manager = hidManager else { return }
-        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.hidManager = nil
         self.isRunning = false
@@ -115,7 +115,7 @@ final class TouchDeviceManager {
         start()
     }
 
-    // MARK: - CGEventTap 幽靈事件防護盾 (阻斷 macOS 內核產生的誤反白與拖曳)
+    // MARK: - CGEventTap 幽靈事件防護盾 (阻斷 macOS 內核產生的誤反白、拖曳與幽靈右鍵)
 
     func setupEventTap() {
         guard eventTapPort == nil else { return }
@@ -123,7 +123,10 @@ final class TouchDeviceManager {
 
         let mask: CGEventMask = (CGEventMask(1) << CGEventType.leftMouseDown.rawValue) |
                                 (CGEventMask(1) << CGEventType.leftMouseDragged.rawValue) |
-                                (CGEventMask(1) << CGEventType.leftMouseUp.rawValue)
+                                (CGEventMask(1) << CGEventType.leftMouseUp.rawValue) |
+                                (CGEventMask(1) << CGEventType.rightMouseDown.rawValue) |
+                                (CGEventMask(1) << CGEventType.rightMouseDragged.rawValue) |
+                                (CGEventMask(1) << CGEventType.rightMouseUp.rawValue)
 
         let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -146,20 +149,25 @@ final class TouchDeviceManager {
                 // 檢查是否為 macTouchControl 主動合成發送的白名單事件（簽名 0x544F5543 = "TOUC"）
                 let signature = event.getIntegerValueField(.eventSourceUserData)
                 if signature == TouchGestureHandler.synthesizedEventSignature {
-                    // 由本程式經嚴格手勢判定後合法派發的 Tap Click，完全放行
+                    // 由本程式經嚴格手勢判定後合法派發的點擊，完全放行
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 若使用者啟用了平板滑動模式，且目前外接觸控螢幕正處於碰觸中（或碰觸剛結束 150ms 內）：
-                // 該未簽名事件必為 macOS 系統內核 IOHIDFamily 將觸控面板誤當滑鼠所自發產生的幽靈 leftMouseDown / leftMouseDragged / leftMouseUp
-                // 必須在事件鏈頂端徹底攔截並銷毀 (return nil)，徹底杜絕誤選取文字 (Highlight)、誤拖曳檔案/視窗與誤 Click！
+                // 若觸控螢幕處於碰觸中（或碰觸剛結束 150ms 內）：
                 let isTouchActive = manager.isAnyTouchActive
                 let recentlyReleased = (ProcessInfo.processInfo.systemUptime - manager.lastTouchReleaseTime < 0.15)
                 let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
 
-                if isTabletScroll && (isTouchActive || recentlyReleased) {
-                    // 攔截並銷毀 macOS 系統底層產生的幽靈拖曳與誤點擊！
-                    return nil
+                if isTouchActive || recentlyReleased {
+                    // 1. 右鍵事件過濾：任何非本 App 主動授權派發的硬體/系統右鍵一律攔截銷毀（確保關閉右鍵時絕對生效）
+                    if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
+                        return nil
+                    }
+
+                    // 2. 左鍵拖曳與點擊過濾：啟用了平板滑動模式時，徹底阻斷 macOS 內核將觸控板誤當滑鼠產生的幽靈拖曳與誤點擊
+                    if isTabletScroll {
+                        return nil
+                    }
                 }
 
                 return Unmanaged.passUnretained(event)
@@ -360,8 +368,9 @@ final class TouchDeviceManager {
                 state.pendingXUpdate = true
                 deviceStates[id] = state
 
-                // 若單獨只有 X 更新（純水平滑動或 Y 軸落後），在當前 RunLoop 週期結束時保底派發，確保零幀延遲
-                CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) { [weak self] in
+                // 採用 commonModes 並即刻喚醒 RunLoop，保證在事件追蹤（Tracking）期間絕不延遲滯留
+                let runLoop = CFRunLoopGetMain()
+                CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { [weak self] in
                     guard let self else { return }
                     MainActor.assumeIsolated {
                         var curState = self.deviceStates[id] ?? state
@@ -372,6 +381,7 @@ final class TouchDeviceManager {
                         }
                     }
                 }
+                CFRunLoopWakeUp(runLoop)
                 return
             } else if usage == kHIDUsage_GD_Y {
                 state.rawY = Double(intVal)

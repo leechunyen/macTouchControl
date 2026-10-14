@@ -545,7 +545,7 @@ struct ContentView: View {
                                         get: { gestureHandler.scrollSensitivity },
                                         set: { gestureHandler.scrollSensitivity = $0 }
                                     ),
-                                    in: 0.5...2.5,
+                                    in: 0.5...3.0,
                                     step: 0.1
                                 )
                                 .frame(width: 140)
