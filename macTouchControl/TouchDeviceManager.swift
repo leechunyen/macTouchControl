@@ -31,6 +31,7 @@ final class TouchDeviceManager {
         var rawY: Double = 0
         var isDown: Bool = false
         var pendingXUpdate: Bool = false
+        var hasTipSwitch: Bool = false
     }
 
     init() {
@@ -286,6 +287,7 @@ final class TouchDeviceManager {
             }
         } else if page == kHIDPage_Digitizer {
             if usage == kHIDUsage_Dig_TipSwitch {
+                state.hasTipSwitch = true
                 let newDown = (intVal > 0)
                 if newDown != state.isDown {
                     state.isDown = newDown
@@ -294,10 +296,13 @@ final class TouchDeviceManager {
             }
         } else if page == kHIDPage_Button {
             if usage == 1 { // Button 1
-                let newDown = (intVal > 0)
-                if newDown != state.isDown {
-                    state.isDown = newDown
-                    tipChanged = true
+                // 只有在裝置未曾回報過 Digitizer TipSwitch 時，才由 Button 1 決定觸碰狀態，防止雙報告競爭抖動
+                if !state.hasTipSwitch {
+                    let newDown = (intVal > 0)
+                    if newDown != state.isDown {
+                        state.isDown = newDown
+                        tipChanged = true
+                    }
                 }
             }
         }

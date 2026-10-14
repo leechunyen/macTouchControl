@@ -12,10 +12,10 @@ import AppKit
 /// 外接觸控螢幕專用觸控手勢處理引擎
 /// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
 /// 2. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
-/// 3. 滑動三重防誤觸鎖定（Click Lock Engine）：
-///    - 手勢一旦進入滑動（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click
-///    - 捲動活躍工作階段（isScrollSessionActive，滑動後 400ms 內），所有落指與抬起一律鎖定 Click，杜絕煞車或連滑誤開連結
-///    - 捲動開始前強制發送 leftMouseUp（Anti-Highlight），徹底阻斷文字反白拖曳
+/// 3. 滑動絕對防誤觸（Bulletproof Click Lock）：
+///    - 手勢一旦位移（>= 2.0pt）即刻轉入滑動狀態（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click，嚴禁任何點擊
+///    - 捲動過程絕對不發送任何未預期的滑鼠事件（嚴禁發送偽造的 leftMouseUp，杜絕瀏覽器誤觸發點擊）
+///    - 捲動活躍工作階段（isScrollSessionActive，滑動後 450ms 內），所有落指與抬起一律鎖定 Click，杜絕煞車或連滑誤開連結
 /// 4. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，可自由切換）
 /// 5. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
 @Observable
@@ -78,16 +78,16 @@ final class TouchGestureHandler {
     /// 上次捲動發生的時間戳（包含連續手勢捲動與慣性捲動）
     private(set) var lastScrollTimestamp: TimeInterval = 0
 
-    /// 捲動冷卻鎖定視窗（400ms）：在捲動發生後的 400ms 內，點擊判定全面鎖定，所有落指抬起均視為捲動煞車或換向調整，絕不誤觸點擊
-    private let scrollClickLockDuration: TimeInterval = 0.40
+    /// 捲動冷卻鎖定視窗（450ms）：在捲動發生後的 450ms 內，點擊判定全面鎖定，所有落指抬起均視為捲動煞車或換向調整，絕不誤觸點擊
+    private let scrollClickLockDuration: TimeInterval = 0.45
 
     /// 是否處於捲動活躍工作階段（此時點擊被完全鎖定）
     var isScrollSessionActive: Bool {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 冷啟動時的滑動門檻 (3.5pt，極致跟手，杜絕卡頓感)
-    private let initialSlopThreshold: CGFloat = 3.5
+    /// 冷啟動時的滑動門檻 (2.0pt，極致跟手，手指微移立刻轉入滑動並鎖死點擊)
+    private let initialSlopThreshold: CGFloat = 2.0
 
     /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (1.0pt，手指一動即刻雙向反應，零遲滯)
     private let activeSessionSlopThreshold: CGFloat = 1.0
@@ -100,11 +100,11 @@ final class TouchGestureHandler {
     /// 長按右鍵門檻：長按 0.45 秒觸發右鍵（如同 Windows / Surface 觸控體驗）
     private let longPressThreshold: TimeInterval = 0.45
 
-    /// 有效輕點最短時間 (40ms)，過濾硬體電容抖動造成的幽靈誤點擊
-    private let minTapDuration: TimeInterval = 0.04
+    /// 有效輕點最短時間 (50ms)，過濾硬體電容抖動造成的幽靈誤點擊
+    private let minTapDuration: TimeInterval = 0.05
 
-    /// 有效輕點最長時間 (200ms)，超過此時間未滑動亦不判定為誤點擊
-    private let maxTapDuration: TimeInterval = 0.20
+    /// 有效輕點最長時間 (220ms)，超過此時間未滑動亦不判定為誤點擊
+    private let maxTapDuration: TimeInterval = 0.22
 
     /// 慣性摩擦衰減係數
     private let friction: Double = 0.94
@@ -232,7 +232,6 @@ final class TouchGestureHandler {
             if dist >= activeSessionSlopThreshold {
                 hasScrolledInCurrentGesture = true
                 lastScrollTimestamp = timestamp
-                cancelAnyMouseDrag(at: point)
                 gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
                 postScrollEvent(deltaX: dx, deltaY: dy, phase: .began)
             }
@@ -245,13 +244,10 @@ final class TouchGestureHandler {
             let threshold = currentSlopThreshold
 
             if distance >= threshold {
-                // 超過滑動門檻，立即無延遲切入滑動模式，並鎖死點擊
+                // 超過極小滑動門檻 (2.0pt)，立即無延遲切入滑動模式，並全面鎖死點擊
                 cancelLongPressTimer()
                 hasScrolledInCurrentGesture = true
                 lastScrollTimestamp = timestamp
-
-                // 重要：在發送任何捲動事件之前，確保滑鼠左鍵已強制釋放，徹底阻斷滑鼠拖曳文字反白 (Anti-Highlight)
-                cancelAnyMouseDrag(at: point)
 
                 gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
 
@@ -321,10 +317,11 @@ final class TouchGestureHandler {
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
 
-            // 【極致三重防誤觸鎖定 Click】：
+            // 【極致嚴格防誤觸鎖定 Click】：
             // 1. 若手勢曾進入捲動狀態（hasScrolledInCurrentGesture == true），絕對鎖死點擊
-            // 2. 若處於捲動活躍工作階段（isScrollSessionActive == true，400ms 內曾滑動），絕對鎖死點擊
-            // 3. 接觸時長與位移必須在極為嚴格的點擊範圍內（40ms ~ 200ms，位移 < initialSlopThreshold）
+            // 2. 若處於捲動活躍工作階段（isScrollSessionActive == true，450ms 內曾滑動），絕對鎖死點擊
+            // 3. 接觸時長與位移必須在極為嚴格的靜態點擊範圍內（50ms ~ 220ms，位移 < initialSlopThreshold (2.0pt)）
+            // 4. 一旦使用者試圖滑動（位移超過 2.0pt），早已切入 .scrolling 狀態，絕無可能在此觸發點擊
             if !hasScrolledInCurrentGesture &&
                !isScrollSessionActive &&
                elapsed >= minTapDuration &&
@@ -479,20 +476,7 @@ final class TouchGestureHandler {
         event.post(tap: .cghidEventTap)
     }
 
-    /// 強制取消任何可能的滑鼠拖曳狀態，避免滑動時產生文字反白選取 (Anti-Highlight)
-    private func cancelAnyMouseDrag(at point: CGPoint) {
-        guard PermissionManager.shared.isAccessibilityGranted else { return }
-        guard let up = CGEvent(
-            mouseEventSource: nil,
-            mouseType: .leftMouseUp,
-            mouseCursorPosition: point,
-            mouseButton: .left
-        ) else { return }
-        up.setIntegerValueField(.mouseEventClickState, value: 0)
-        up.post(tap: .cghidEventTap)
-    }
-
-    /// 合成標準左鍵輕點（原子性同步發送，嚴防拖曳反白與連續點擊選取文字）
+    /// 合成標準左鍵輕點（原子性同步發送，嚴防連續點擊選取文字）
     private func synthesizeClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
