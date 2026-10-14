@@ -189,15 +189,7 @@ final class TouchDeviceManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 4. 觸控點近距隔離：若滑鼠事件位置距離手指落點超過 80pt，判定為實體滑鼠操作，完全放行
-                if let lastPt = manager.lastTouchPoint {
-                    let dist = hypot(location.x - lastPt.x, location.y - lastPt.y)
-                    if dist > 80.0 {
-                        return Unmanaged.passUnretained(event)
-                    }
-                }
-
-                // 5. 僅攔截外接觸控螢幕在「手勢手指接觸期間」由系統/硬體產生的未授權幽靈事件
+                // 4. 僅在外接觸控螢幕且手指處於接觸中時，攔截未授權的硬體/系統幽靈事件（防止快速滑動時幽靈拖曳洩漏產生衝突卡頓）
                 let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
                 if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
                     return nil

@@ -66,7 +66,7 @@ final class TouchGestureHandler {
     private enum GestureState {
         case idle
         /// 手指剛落下，尚未判定為點擊、滑動、長按或拖曳
-        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat, isTitleBar: Bool)
+        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat)
         /// 觸碰剛好用來煞停慣性滑行（碰觸煞車），抬手時嚴禁誤點擊
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
@@ -209,21 +209,19 @@ final class TouchGestureHandler {
         }
 
         let inActiveSession = isScrollSessionActive
-        let onTitleBar = isTitleBar(at: point)
 
         gestureState = .pending(
             startPoint: point,
             startNormalized: normalized,
             startTime: timestamp,
-            maxDisplacement: 0,
-            isTitleBar: onTitleBar
+            maxDisplacement: 0
         )
 
         // 若非連續快速滑動冷卻中，排程定點長按計時器（用於觸發右鍵或就緒「按著拖曳」）
         if !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
-                if case .pending(let startPoint, _, _, let maxDisp, _) = self.gestureState {
+                if case .pending(let startPoint, _, _, let maxDisp) = self.gestureState {
                     if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
                         // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
                         self.gestureState = .longPressArmed(point: startPoint)
@@ -259,7 +257,7 @@ final class TouchGestureHandler {
                 postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
             }
 
-        case .pending(let startPoint, let startNorm, let startTime, let maxDisp, let isTitleBar):
+        case .pending(let startPoint, let startNorm, let startTime, let maxDisp):
             let dx = point.x - startPoint.x
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
@@ -269,29 +267,21 @@ final class TouchGestureHandler {
             if distance >= threshold {
                 cancelLongPressTimer()
 
-                if isTitleBar {
-                    // 【視窗標題列直接拖曳】：手指在標題列滑動，直接進行視窗拖曳！
-                    gestureState = .dragging(lastPoint: point)
-                    synthesizeMouseEvent(type: .leftMouseDown, point: startPoint)
-                    synthesizeMouseEvent(type: .leftMouseDragged, point: point)
-                } else {
-                    // 【內容區域滑動】：超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
-                    hasScrolledInCurrentGesture = true
-                    lastScrollTimestamp = timestamp
-                    lastScrollPoint = point
+                // 超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
+                hasScrolledInCurrentGesture = true
+                lastScrollTimestamp = timestamp
+                lastScrollPoint = point
 
-                    gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
+                gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
 
-                    // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
-                    postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
-                }
+                // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
+                postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
             } else {
                 gestureState = .pending(
                     startPoint: startPoint,
                     startNormalized: startNorm,
                     startTime: startTime,
-                    maxDisplacement: updatedMaxDisp,
-                    isTitleBar: isTitleBar
+                    maxDisplacement: updatedMaxDisp
                 )
             }
 
@@ -361,7 +351,7 @@ final class TouchGestureHandler {
             lastScrollTimestamp = timestamp
             // 煞車手勢抬起，絕對不觸發任何點擊
 
-        case .pending(let startPoint, _, let startTime, let maxDisp, _):
+        case .pending(let startPoint, _, let startTime, let maxDisp):
             gestureState = .idle
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
@@ -475,61 +465,33 @@ final class TouchGestureHandler {
         }
     }
 
-    // MARK: - Window & Title Bar Inspection (智慧標題列識別)
-
-    /// 判定觸控點是否位於某個視窗的頂部標題列／工具列區域（預設約 52pt，排除左上角紅黃綠交通燈按鈕）
-    private func isTitleBar(at point: CGPoint) -> Bool {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return false }
-
-        for window in windowList {
-            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
-            guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
-                  let x = boundsDict["X"] as? CGFloat,
-                  let y = boundsDict["Y"] as? CGFloat,
-                  let w = boundsDict["Width"] as? CGFloat,
-                  let h = boundsDict["Height"] as? CGFloat else { continue }
-
-            let rect = CGRect(x: x, y: y, width: w, height: h)
-            if rect.contains(point) {
-                let titleBarHeight: CGFloat = 52.0
-                let titleBarRect = CGRect(x: x, y: y, width: w, height: min(h, titleBarHeight))
-                if titleBarRect.contains(point) {
-                    // 排除視窗左上角紅黃綠交通燈按鈕區域（寬約 75pt）
-                    let trafficLights = CGRect(x: x, y: y, width: 75, height: titleBarHeight)
-                    return !trafficLights.contains(point)
-                }
-                return false
-            }
-        }
-        return false
-    }
-
     // MARK: - Low-Level CGEvent Synthesis (2D Scroll, Click & Drag)
 
-    /// 確保落指時目標螢幕下方的應用程式與視窗即刻獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流
+    /// 確保落指時目標螢幕下方的應用程式與視窗在背景異步獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流，同時絕不阻塞主線程實時手勢判定
     private func activateAppUnder(point: CGPoint) {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return }
+        DispatchQueue.global(qos: .userInteractive).async {
+            let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+            guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return }
 
-        for window in windowList {
-            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
-            guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
-                  let x = boundsDict["X"] as? CGFloat,
-                  let y = boundsDict["Y"] as? CGFloat,
-                  let w = boundsDict["Width"] as? CGFloat,
-                  let h = boundsDict["Height"] as? CGFloat else { continue }
+            for window in windowList {
+                guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+                guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
+                      let x = boundsDict["X"] as? CGFloat,
+                      let y = boundsDict["Y"] as? CGFloat,
+                      let w = boundsDict["Width"] as? CGFloat,
+                      let h = boundsDict["Height"] as? CGFloat else { continue }
 
-            let rect = CGRect(x: x, y: y, width: w, height: h)
-            if rect.contains(point) {
-                if let pid = window[kCGWindowOwnerPID as String] as? pid_t,
-                   let app = NSRunningApplication(processIdentifier: pid),
-                   app.bundleIdentifier != Bundle.main.bundleIdentifier {
-                    if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier == pid {
-                        return // 已經是前台活躍應用，無需重複啟動
+                let rect = CGRect(x: x, y: y, width: w, height: h)
+                if rect.contains(point) {
+                    if let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                       let app = NSRunningApplication(processIdentifier: pid),
+                       app.bundleIdentifier != Bundle.main.bundleIdentifier {
+                        if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier == pid {
+                            return // 已經是前台活躍應用，無需重複啟動
+                        }
+                        app.activate()
+                        return
                     }
-                    app.activate()
-                    return
                 }
             }
         }
