@@ -283,4 +283,24 @@ struct MacTouchControlTests {
         handler.scrollSensitivity = 1.0
         handler.isLongPressRightClickEnabled = true
     }
+
+    @Test("測試視窗拖曳與按著拖手勢模擬")
+    @MainActor
+    func testWindowDraggingAndPressHoldDrag() {
+        let handler = TouchGestureHandler()
+        let norm = CGPoint(x: 0.5, y: 0.5)
+
+        // 1. 模擬快速滑動（捲動）
+        let startPt = CGPoint(x: 300, y: 500)
+        let movePt = CGPoint(x: 300, y: 560)
+        handler.handleTouch(point: startPt, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: movePt, normalized: norm, isDown: true, tipChanged: false)
+        #expect(handler.hasScrolledInCurrentGesture == true)
+        handler.handleTouch(point: movePt, normalized: norm, isDown: false, tipChanged: true)
+
+        // 2. 模擬普通點擊
+        let tapPt = CGPoint(x: 400, y: 400)
+        handler.handleTouch(point: tapPt, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: tapPt, normalized: norm, isDown: false, tipChanged: true)
+    }
 }

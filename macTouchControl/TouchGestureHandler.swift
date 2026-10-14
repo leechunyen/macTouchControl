@@ -11,21 +11,21 @@ import AppKit
 
 /// 外接觸控螢幕專用觸控手勢處理引擎
 /// 1. 平板／手機風格雙向捲動（2D Direct Manipulation Scrolling）：上下與左右滑動均直接跟手，零延遲反映
-/// 2. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
-/// 3. 精確浮點次像素輸出（1:1 True Pixel Scroll & Sensitivity）：直接填寫 fixedPtDelta 與 pointDelta，突破 macOS 預設縮水 10 倍之限制，速度拉條完全真實生效，絲滑流暢不卡頓
-/// 4. 游標與視窗命中焦點同步（WindowServer Hit-Test Pointer Sync）：落指與捲動時即時同步更新 WindowServer 指針目標 (mouseMoved + event.location)，徹底解決跨視窗／點選開關後滾動卡頓的根本問題！
-/// 5. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：
-///    - 手勢一旦位移（>= 2.0pt）即刻轉入滑動狀態（hasScrolledInCurrentGesture == true），抬手絕對鎖死 Click，嚴禁任何點擊
-///    - 捲動過程絕對不發送任何未預期的滑鼠事件（嚴禁發送偽造的 leftMouseUp，杜絕瀏覽器誤觸發點擊）
-///    - 白名單事件簽名（synthesizedEventSignature）：只有經過嚴格手勢判定為合法 Tap 的事件才允許通過 CGEventTap，其餘 macOS 底層產生的幽靈 Drag/MouseDown 一律被攔截銷毀
-/// 6. Windows 風格長按觸發右鍵：定點長按約 0.45 秒呼叫右鍵捷徑選單（預設開啟，關閉時藉由 EventTap 100% 阻斷硬體幽靈右鍵）
-/// 7. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
+/// 2. 視窗拖曳與「按著拖」支援（Window Title Bar Drag & Press-and-Hold Drag）：
+///    - 觸摸任何視窗頂部標題列直接滑動即可拖曳移動視窗（Direct Window Dragging）
+///    - 任何區域定點長按（約 0.38s）後移動，無縫切入「按著拖」（Press-and-Hold Drag），可自由拖曳視窗、物件、滑桿或文字選取
+/// 3. Windows 風格長按觸發右鍵：定點長按後若「抬起手指」，即觸發右鍵捷徑選單（長按後若「滑動」則自動轉為拖曳，二者完美互不衝突）
+/// 4. 游標與視窗命中焦點同步（WindowServer Hit-Test Pointer Sync）：落指與捲動時即時同步更新 WindowServer 指針目標 (mouseMoved + event.location + 跨螢幕應用無感啟動)，徹底解決跨視窗／點選開關後滾動卡頓的根本問題
+/// 5. 換向即刻反應（Instant Direction Reversal）：滑動時突然反向或煞車反甩，零延遲瞬間響應，清空反向次像素與慣性歷史
+/// 6. 精確浮點次像素輸出（1:1 True Pixel Scroll & Sensitivity）：直接填寫 fixedPtDelta 與 pointDelta，速度拉條完全真實生效，絲滑流暢不卡頓
+/// 7. 滑動絕對防誤觸（Bulletproof Click Lock & Anti-Highlight）：手勢一旦位移即鎖死 Click，白名單事件簽名（0x544F5543）杜絕幽靈誤點擊
+/// 8. 2D 物理慣性滑行模擬器（相容 macOS 原生滾動動畫終止標準）
 @Observable
 @MainActor
 final class TouchGestureHandler {
     static let shared = TouchGestureHandler()
 
-    /// 合成白名單事件簽名（"TOUC" in hex: 0x544F5543），供 CGEventTap 識別合法點擊並攔截系統幽靈拖曳
+    /// 合成白名單事件簽名（"TOUC" in hex: 0x544F5543），供 CGEventTap 識別合法點擊與拖曳
     static let synthesizedEventSignature: Int64 = 0x544F5543
 
     // MARK: - User Settings (預設均為開啟)
@@ -65,14 +65,16 @@ final class TouchGestureHandler {
 
     private enum GestureState {
         case idle
-        /// 手指剛落下，尚未判定為點擊、滑動或長按
-        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat)
+        /// 手指剛落下，尚未判定為點擊、滑動、長按或拖曳
+        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat, isTitleBar: Bool)
         /// 觸碰剛好用來煞停慣性滑行（碰觸煞車），抬手時嚴禁誤點擊
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
         case scrolling(lastPoint: CGPoint, velocityTracker: [(TimeInterval, CGPoint)])
-        /// 長按時間已達標並觸發右鍵
-        case longPressTriggered(point: CGPoint)
+        /// 定點長按已就緒（若抬手則觸發右鍵；若手指移動則無縫切換為「按著拖曳」）
+        case longPressArmed(point: CGPoint)
+        /// 正在進行物件或視窗拖曳（滑鼠左鍵按住拖曳）
+        case dragging(lastPoint: CGPoint)
     }
 
     private var gestureState: GestureState = .idle
@@ -97,7 +99,7 @@ final class TouchGestureHandler {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 冷啟動時的滑動門檻 (2.0pt，極致跟手，手指微移立刻轉入滑動並鎖死點擊)
+    /// 冷啟動時的滑動門檻 (2.0pt，極致跟手，手指微移立刻轉入滑動或拖曳並鎖死點擊)
     private let initialSlopThreshold: CGFloat = 2.0
 
     /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (1.0pt，手指一動即刻雙向反應，零遲滯)
@@ -108,8 +110,8 @@ final class TouchGestureHandler {
         isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
     }
 
-    /// 長按右鍵門檻：長按 0.45 秒觸發右鍵（如同 Windows / Surface 觸控體驗）
-    private let longPressThreshold: TimeInterval = 0.45
+    /// 定點長按門檻：長按約 0.38 秒（如同 Windows / Surface 觸控體驗）
+    private let longPressThreshold: TimeInterval = 0.38
 
     /// 有效輕點最短時間 (50ms)，過濾硬體電容抖動造成的幽靈誤點擊
     private let minTapDuration: TimeInterval = 0.05
@@ -207,22 +209,24 @@ final class TouchGestureHandler {
         }
 
         let inActiveSession = isScrollSessionActive
+        let onTitleBar = isTitleBar(at: point)
 
         gestureState = .pending(
             startPoint: point,
             startNormalized: normalized,
             startTime: timestamp,
-            maxDisplacement: 0
+            maxDisplacement: 0,
+            isTitleBar: onTitleBar
         )
 
-        // 僅在開啟長按右鍵且非連續捲動冷卻時才排程長按右鍵
-        if isLongPressRightClickEnabled && !inActiveSession {
+        // 若非連續快速滑動冷卻中，排程定點長按計時器（用於觸發右鍵或就緒「按著拖曳」）
+        if !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
-                if case .pending(let startPoint, _, _, let maxDisp) = self.gestureState {
-                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive && self.isLongPressRightClickEnabled {
-                        self.gestureState = .longPressTriggered(point: startPoint)
-                        self.synthesizeRightClick(at: startPoint)
+                if case .pending(let startPoint, _, _, let maxDisp, _) = self.gestureState {
+                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
+                        // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
+                        self.gestureState = .longPressArmed(point: startPoint)
                     }
                 }
             }
@@ -255,7 +259,7 @@ final class TouchGestureHandler {
                 postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
             }
 
-        case .pending(let startPoint, let startNorm, let startTime, let maxDisp):
+        case .pending(let startPoint, let startNorm, let startTime, let maxDisp, let isTitleBar):
             let dx = point.x - startPoint.x
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
@@ -263,24 +267,52 @@ final class TouchGestureHandler {
             let threshold = currentSlopThreshold
 
             if distance >= threshold {
-                // 超過極小滑動門檻 (2.0pt)，立即無延遲切入滑動模式，並全面鎖死點擊
                 cancelLongPressTimer()
-                hasScrolledInCurrentGesture = true
-                lastScrollTimestamp = timestamp
-                lastScrollPoint = point
 
-                gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
+                if isTitleBar {
+                    // 【視窗標題列直接拖曳】：手指在標題列滑動，直接進行視窗拖曳！
+                    gestureState = .dragging(lastPoint: point)
+                    synthesizeMouseEvent(type: .leftMouseDown, point: startPoint)
+                    synthesizeMouseEvent(type: .leftMouseDragged, point: point)
+                } else {
+                    // 【內容區域滑動】：超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
+                    hasScrolledInCurrentGesture = true
+                    lastScrollTimestamp = timestamp
+                    lastScrollPoint = point
 
-                // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
-                postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
+                    gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
+
+                    // 立即發送第一筆捲動事件（保留完整位移量，起步絕不卡頓）
+                    postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
+                }
             } else {
                 gestureState = .pending(
                     startPoint: startPoint,
                     startNormalized: startNorm,
                     startTime: startTime,
-                    maxDisplacement: updatedMaxDisp
+                    maxDisplacement: updatedMaxDisp,
+                    isTitleBar: isTitleBar
                 )
             }
+
+        case .longPressArmed(let startPoint):
+            let dx = point.x - startPoint.x
+            let dy = point.y - startPoint.y
+            let distance = hypot(dx, dy)
+
+            if distance >= initialSlopThreshold {
+                // 【按著拖 (Press-and-Hold Drag)】：
+                // 使用者定點長按後開始移動手指，立刻轉入左鍵按住拖曳模式！
+                // 可自由拖曳任何視窗、檔案、文字選取或滑桿！
+                gestureState = .dragging(lastPoint: point)
+                synthesizeMouseEvent(type: .leftMouseDown, point: startPoint)
+                synthesizeMouseEvent(type: .leftMouseDragged, point: point)
+            }
+
+        case .dragging:
+            // 正在進行物件或視窗拖曳，發送連續左鍵拖曳事件
+            gestureState = .dragging(lastPoint: point)
+            synthesizeMouseEvent(type: .leftMouseDragged, point: point)
 
         case .scrolling(let lastPoint, var velocityTracker):
             let dx = point.x - lastPoint.x
@@ -309,10 +341,6 @@ final class TouchGestureHandler {
 
             // 即時發送雙向連續捲動更新
             postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .changed)
-
-        case .longPressTriggered:
-            // 長按右鍵已觸發，手指滑動不發送左鍵拖曳或捲動，避免誤干擾
-            break
         }
     }
 
@@ -333,7 +361,7 @@ final class TouchGestureHandler {
             lastScrollTimestamp = timestamp
             // 煞車手勢抬起，絕對不觸發任何點擊
 
-        case .pending(let startPoint, _, let startTime, let maxDisp):
+        case .pending(let startPoint, _, let startTime, let maxDisp, _):
             gestureState = .idle
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
@@ -342,7 +370,6 @@ final class TouchGestureHandler {
             // 1. 若手勢曾進入捲動狀態（hasScrolledInCurrentGesture == true），絕對鎖死點擊
             // 2. 若處於捲動活躍工作階段（isScrollSessionActive == true，450ms 內曾滑動），絕對鎖死點擊
             // 3. 接觸時長與位移必須在極為嚴格的靜態點擊範圍內（50ms ~ 220ms，位移 < initialSlopThreshold (2.0pt)）
-            // 4. 一旦使用者試圖滑動（位移超過 2.0pt），早已切入 .scrolling 狀態，絕無可能在此觸發點擊
             if !hasScrolledInCurrentGesture &&
                !isScrollSessionActive &&
                elapsed >= minTapDuration &&
@@ -351,6 +378,19 @@ final class TouchGestureHandler {
                maxDisp < initialSlopThreshold {
                 synthesizeClick(at: startPoint)
             }
+
+        case .longPressArmed(let startPoint):
+            gestureState = .idle
+            // 【長按抬手觸發右鍵】：
+            // 使用者在定點長按達標後抬起手指（未進行拖曳），觸發 Windows 風格右鍵選單！
+            if isLongPressRightClickEnabled {
+                synthesizeRightClick(at: startPoint)
+            }
+
+        case .dragging:
+            // 【拖曳結束釋放】：手指抬起，發送 leftMouseUp 結束視窗或物件拖曳
+            gestureState = .idle
+            synthesizeMouseEvent(type: .leftMouseUp, point: point)
 
         case .scrolling(_, let velocityTracker):
             gestureState = .idle
@@ -374,10 +414,6 @@ final class TouchGestureHandler {
                     }
                 }
             }
-
-        case .longPressTriggered:
-            // 長按右鍵選單已開啟，手指抬起時重設狀態，不發送任何左鍵點擊
-            gestureState = .idle
         }
     }
 
@@ -439,7 +475,37 @@ final class TouchGestureHandler {
         }
     }
 
-    // MARK: - Low-Level CGEvent Synthesis (2D Scroll & Click)
+    // MARK: - Window & Title Bar Inspection (智慧標題列識別)
+
+    /// 判定觸控點是否位於某個視窗的頂部標題列／工具列區域（預設約 52pt，排除左上角紅黃綠交通燈按鈕）
+    private func isTitleBar(at point: CGPoint) -> Bool {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return false }
+
+        for window in windowList {
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let boundsDict = window[kCGWindowBounds as String] as? [String: Any],
+                  let x = boundsDict["X"] as? CGFloat,
+                  let y = boundsDict["Y"] as? CGFloat,
+                  let w = boundsDict["Width"] as? CGFloat,
+                  let h = boundsDict["Height"] as? CGFloat else { continue }
+
+            let rect = CGRect(x: x, y: y, width: w, height: h)
+            if rect.contains(point) {
+                let titleBarHeight: CGFloat = 52.0
+                let titleBarRect = CGRect(x: x, y: y, width: w, height: min(h, titleBarHeight))
+                if titleBarRect.contains(point) {
+                    // 排除視窗左上角紅黃綠交通燈按鈕區域（寬約 75pt）
+                    let trafficLights = CGRect(x: x, y: y, width: 75, height: titleBarHeight)
+                    return !trafficLights.contains(point)
+                }
+                return false
+            }
+        }
+        return false
+    }
+
+    // MARK: - Low-Level CGEvent Synthesis (2D Scroll, Click & Drag)
 
     /// 確保落指時目標螢幕下方的應用程式與視窗即刻獲得焦點與啟動，消除跨螢幕焦點滯留與 macOS 背景 App Nap 滾動節流
     private func activateAppUnder(point: CGPoint) {
@@ -560,6 +626,7 @@ final class TouchGestureHandler {
     private func synthesizeClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
+        activateAppUnder(point: point)
         updateWindowServerPointer(at: point)
 
         guard let down = CGEvent(
@@ -623,6 +690,7 @@ final class TouchGestureHandler {
         up.post(tap: .cghidEventTap)
     }
 
+    /// 合成滑鼠左鍵事件（支援直接拖曳與按著拖曳）
     private func synthesizeMouseEvent(type: CGEventType, point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         updateWindowServerPointer(at: point)
@@ -633,6 +701,7 @@ final class TouchGestureHandler {
             mouseButton: .left
         ) else { return }
         event.location = point
+        event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         event.post(tap: .cghidEventTap)
     }
