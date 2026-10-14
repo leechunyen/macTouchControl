@@ -180,11 +180,14 @@ final class TouchGestureHandler {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 冷啟動時的滑動門檻 (2.0pt，極致跟手，手指微移立刻轉入滑動或拖曳並鎖死點擊)
-    private let initialSlopThreshold: CGFloat = 2.0
+    /// 手指輕點有效位移容許範圍 (8.0pt)：人體手指指腹接觸面約 10~15mm，落指與抬起時的重心自然微移在 8pt 內均判定為有效點擊，杜絕誤當微小滑動
+    private let tapSlopThreshold: CGFloat = 8.0
 
-    /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (1.0pt，手指一動即刻雙向反應，零遲滯)
-    private let activeSessionSlopThreshold: CGFloat = 1.0
+    /// 冷啟動時的滑動門檻 (7.0pt，位移超過 7pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊)
+    private let initialSlopThreshold: CGFloat = 7.0
+
+    /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (3.0pt，連續劃動起步極度跟手)
+    private let activeSessionSlopThreshold: CGFloat = 3.0
 
     /// 取得目前手勢應採用的滑動門檻
     private var currentSlopThreshold: CGFloat {
@@ -194,11 +197,8 @@ final class TouchGestureHandler {
     /// 定點長按門檻：長按約 0.38 秒（如同 Windows / Surface 觸控體驗）
     private let longPressThreshold: TimeInterval = 0.38
 
-    /// 有效輕點最短時間 (50ms)，過濾硬體電容抖動造成的幽靈誤點擊
-    private let minTapDuration: TimeInterval = 0.05
-
-    /// 有效輕點最長時間 (220ms)，超過此時間未滑動亦不判定為誤點擊
-    private let maxTapDuration: TimeInterval = 0.22
+    /// 有效輕點最短時間 (20ms)，過濾極端硬體噪訊
+    private let minTapDuration: TimeInterval = 0.02
 
     /// 慣性摩擦衰減係數
     private let friction: Double = 0.94
@@ -305,7 +305,7 @@ final class TouchGestureHandler {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
                 if case .pending(let startPoint, _, _, let maxDisp, _) = self.gestureState {
-                    if maxDisp < self.initialSlopThreshold && !self.isScrollSessionActive {
+                    if maxDisp < self.tapSlopThreshold && !self.isScrollSessionActive {
                         // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
                         self.gestureState = .longPressArmed(point: startPoint)
                     }
@@ -447,16 +447,15 @@ final class TouchGestureHandler {
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
 
-            // 【極致嚴格防誤觸鎖定 Click】：
+            // 【自然穩健且精確的點擊判定】：
             // 1. 若手勢曾進入捲動狀態（hasScrolledInCurrentGesture == true），絕對鎖死點擊
-            // 2. 若處於捲動活躍工作階段（isScrollSessionActive == true，450ms 內曾滑動），絕對鎖死點擊
-            // 3. 接觸時長與位移必須在極為嚴格的靜態點擊範圍內（50ms ~ 220ms，位移 < initialSlopThreshold (2.0pt)）
+            // 2. 接觸時間在 0.02s 至 longPressThreshold (0.38s) 之間，徹底消除 220ms~380ms 的盲區死角
+            // 3. 最大位移與抬手位移均在指腹容許範圍內 (< tapSlopThreshold (8.0pt))
             if !hasScrolledInCurrentGesture &&
-               !isScrollSessionActive &&
                elapsed >= minTapDuration &&
-               elapsed <= maxTapDuration &&
-               liftDist < initialSlopThreshold &&
-               maxDisp < initialSlopThreshold {
+               elapsed < longPressThreshold &&
+               liftDist < tapSlopThreshold &&
+               maxDisp < tapSlopThreshold {
                 synthesizeClick(at: startPoint)
             }
 
@@ -708,7 +707,11 @@ final class TouchGestureHandler {
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
         down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+
+        // 給予微小且真實的點擊維持時間（約 15ms），保證瀏覽器、按鈕動畫與選單可靠捕捉 Click
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
+            up.post(tap: .cghidEventTap)
+        }
     }
 
     /// 合成 Windows 風格長按右鍵選單（原子性同步發送，帶有防誤觸白名單簽名）
