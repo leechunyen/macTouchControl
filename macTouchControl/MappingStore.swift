@@ -44,6 +44,7 @@ final class MappingStore {
     func saveMappings() {
         if let encoded = try? JSONEncoder().encode(mappings) {
             UserDefaults.standard.set(encoded, forKey: defaultsKey)
+            UserDefaults.standard.synchronize()
         }
     }
 

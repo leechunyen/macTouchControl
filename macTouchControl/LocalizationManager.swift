@@ -18,7 +18,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .system:
-            return "跟隨系統 (System)"
+            return "System"
         case .zh_tw:
             return "繁體中文 (台灣)"
         case .en_us:
@@ -114,6 +114,7 @@ final class LocalizationManager {
     var selectedLanguage: AppLanguage {
         didSet {
             UserDefaults.standard.set(selectedLanguage.rawValue, forKey: userDefaultsKey)
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -129,7 +130,8 @@ final class LocalizationManager {
            let lang = AppLanguage(rawValue: saved) {
             self.selectedLanguage = lang
         } else {
-            self.selectedLanguage = .system
+            // UI 預設為 en_us (English (US))
+            self.selectedLanguage = .en_us
         }
     }
 

@@ -40,6 +40,22 @@ struct MacTouchControlTests {
     @Test("測試動態語系切換與嚴格台灣繁體中文用語")
     @MainActor
     func testLocalizedStrings() {
+        // 驗證 UI 預設為 en_us (English (US)) 且語言選單顯示名稱
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.appLanguage")
+        let freshManager = LocalizationManager()
+        #expect(freshManager.selectedLanguage == .en_us)
+        #expect(freshManager.currentEffectiveLanguage == .en_us)
+        #expect(AppLanguage.system.displayName == "System")
+        #expect(AppLanguage.en_us.displayName == "English (US)")
+        #expect(AppLanguage.zh_tw.displayName == "繁體中文 (台灣)")
+
+        // 測試持久化保存 user setting
+        freshManager.selectedLanguage = .system
+        #expect(UserDefaults.standard.string(forKey: "macTouchControl.appLanguage") == "system")
+
+        freshManager.selectedLanguage = .zh_tw
+        #expect(UserDefaults.standard.string(forKey: "macTouchControl.appLanguage") == "zh-Hant")
+
         let manager = LocalizationManager()
 
         // 強制切換為英文

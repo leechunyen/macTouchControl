@@ -115,6 +115,7 @@ final class TouchGestureHandler {
     var isTouchScrollEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isTouchScrollEnabled, forKey: "macTouchControl.touchScrollEnabled")
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -122,6 +123,7 @@ final class TouchGestureHandler {
     var naturalScroll: Bool = true {
         didSet {
             UserDefaults.standard.set(naturalScroll, forKey: "macTouchControl.naturalScroll")
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -129,6 +131,7 @@ final class TouchGestureHandler {
     var scrollSensitivity: Double = 1.0 {
         didSet {
             UserDefaults.standard.set(scrollSensitivity, forKey: "macTouchControl.scrollSensitivity")
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -136,6 +139,7 @@ final class TouchGestureHandler {
     var isLongPressRightClickEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isLongPressRightClickEnabled, forKey: "macTouchControl.longPressRightClickEnabled")
+            UserDefaults.standard.synchronize()
             if !isLongPressRightClickEnabled {
                 cancelLongPressTimer()
             }
