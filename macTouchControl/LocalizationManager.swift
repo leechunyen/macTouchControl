@@ -295,17 +295,17 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "捲動靈敏度"
         case .longPressRightClickTitle:
-            return "長按右鍵與按住拖曳 (Windows / iPad 風格)"
+            return "長按右鍵 (Windows / iPad 風格)"
         case .longPressRightClickDesc:
-            return "點一下為 Click；定點按住倒數光圈中放開為右鍵；光圈跑完不放開為 Click Hold 直到放開"
+            return "開啟時：定點按住顯示倒數光圈，光圈內放開為右鍵；光圈跑完不放開為 Click Hold 直到放開"
         case .longPressRightClickDisabledDesc:
-            return "已關閉右鍵與光圈：點一下為 Click；定點按住直接為 Click Hold 直到放開"
+            return "關閉時：停用右鍵與倒數光圈，按住直接為 Click Hold 直到放開（一般拖曳與點擊完全不受影響）"
         case .longPressDurationTitle:
             return "長按倒數時間"
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
-            return "長按右鍵與按住拖曳"
+            return "長按右鍵"
         case .menuToggleRightEdgeNotificationCenter:
             return "右緣向內滑開通知中心"
         case .gestureNotificationCenterTitle:
@@ -444,17 +444,17 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "Scroll Sensitivity"
         case .longPressRightClickTitle:
-            return "Long Press Right-Click & Drag (Windows / iPad Style)"
+            return "Long Press Right-Click (Windows / iPad Style)"
         case .longPressRightClickDesc:
-            return "Tap for Click; release during animated ring countdown for Right-Click; hold past completion for Click Hold until release"
+            return "When enabled: hold to show countdown ring, release during countdown for Right-Click; hold past countdown for Click Hold"
         case .longPressRightClickDisabledDesc:
-            return "Right-Click & ring disabled: Tap for Click; press-and-hold acts directly as Click Hold until release"
+            return "When disabled: Right-Click & ring disabled, holding acts directly as Click Hold (dragging and tapping unaffected)"
         case .longPressDurationTitle:
             return "Long-Press Duration"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:
-            return "Long Press Right-Click & Drag"
+            return "Long Press Right-Click"
         case .menuToggleRightEdgeNotificationCenter:
             return "Swipe Right Edge for Notification Center"
         case .gestureNotificationCenterTitle:
