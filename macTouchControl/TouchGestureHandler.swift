@@ -146,12 +146,20 @@ final class TouchGestureHandler {
         }
     }
 
+    /// 是否啟用右邊緣向內側滑開通知中心（預設開啟）
+    var isRightEdgeNotificationCenterEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(isRightEdgeNotificationCenterEnabled, forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
+            UserDefaults.standard.synchronize()
+        }
+    }
+
     // MARK: - Internal Gesture State
 
     private enum GestureState {
         case idle
         /// 手指剛落下，尚未判定為點擊、滑動、長按或拖曳
-        case pending(startPoint: CGPoint, startNormalized: CGPoint, startTime: TimeInterval, maxDisplacement: CGFloat, isTitleBar: Bool)
+        case pending(startPoint: CGPoint, startNormalized: CGPoint, targetBounds: CGRect?, startTime: TimeInterval, maxDisplacement: CGFloat, isTitleBar: Bool)
         /// 觸碰剛好用來煞停慣性滑行（碰觸煞車），抬手時嚴禁誤點擊
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
@@ -160,6 +168,10 @@ final class TouchGestureHandler {
         case longPressArmed(point: CGPoint)
         /// 正在進行物件或視窗拖曳（滑鼠左鍵按住拖曳）
         case dragging(lastPoint: CGPoint)
+        /// 正在進行右側邊緣向內滑動手勢
+        case edgeSwiping(startPoint: CGPoint, startNormalized: CGPoint, targetBounds: CGRect?)
+        /// 邊緣手勢已觸發（如通知中心已開），直至手指抬起期間忽略後續事件
+        case edgeGestureTriggered
     }
 
     private var gestureState: GestureState = .idle
@@ -213,6 +225,12 @@ final class TouchGestureHandler {
     /// 慣性停止速度 (px/s)
     private let stopMomentumVelocity: Double = 6.0
 
+    /// 判定為右邊緣區域的水平正規化門檻（螢幕最右側 15% 邊緣區）
+    private let rightEdgeZoneRatio: CGFloat = 0.85
+
+    /// 右側邊緣向內滑動觸發通知中心的水平位移門檻（30pt）
+    private let rightEdgeSwipeDistanceThreshold: CGFloat = 30.0
+
     // 慣性滑動計時與速度向量
     private var momentumTimer: Timer?
     private var momentumVx: Double = 0
@@ -227,12 +245,14 @@ final class TouchGestureHandler {
             "macTouchControl.touchScrollEnabled": true,
             "macTouchControl.naturalScroll": true,
             "macTouchControl.scrollSensitivity": 1.0,
-            "macTouchControl.longPressRightClickEnabled": true
+            "macTouchControl.longPressRightClickEnabled": true,
+            "macTouchControl.rightEdgeNotificationCenterEnabled": true
         ])
 
         self.isTouchScrollEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.touchScrollEnabled")
         self.naturalScroll = UserDefaults.standard.bool(forKey: "macTouchControl.naturalScroll")
         self.isLongPressRightClickEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled")
+        self.isRightEdgeNotificationCenterEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
 
         let savedSensitivity = UserDefaults.standard.double(forKey: "macTouchControl.scrollSensitivity")
         self.scrollSensitivity = savedSensitivity > 0 ? savedSensitivity : 1.0
@@ -243,6 +263,7 @@ final class TouchGestureHandler {
     func handleTouch(
         point: CGPoint,
         normalized: CGPoint,
+        targetBounds: CGRect? = nil,
         isDown: Bool,
         tipChanged: Bool
     ) {
@@ -250,7 +271,7 @@ final class TouchGestureHandler {
 
         if tipChanged {
             if isDown {
-                handleTouchDown(point: point, normalized: normalized, timestamp: now)
+                handleTouchDown(point: point, normalized: normalized, targetBounds: targetBounds, timestamp: now)
             } else {
                 handleTouchUp(point: point, timestamp: now)
             }
@@ -261,7 +282,12 @@ final class TouchGestureHandler {
 
     // MARK: - Private Gesture Handlers
 
-    private func handleTouchDown(point: CGPoint, normalized: CGPoint, timestamp: TimeInterval) {
+    private func handleTouchDown(
+        point: CGPoint,
+        normalized: CGPoint,
+        targetBounds: CGRect? = nil,
+        timestamp: TimeInterval
+    ) {
         cancelLongPressTimer()
 
         // 核心同步 1：背景異步啟動落指位置下方的應用程式，消除跨螢幕焦點滯留與 macOS 背景 App Nap 節流
@@ -299,6 +325,7 @@ final class TouchGestureHandler {
         gestureState = .pending(
             startPoint: point,
             startNormalized: normalized,
+            targetBounds: targetBounds,
             startTime: timestamp,
             maxDisplacement: 0,
             isTitleBar: onTitleBar
@@ -308,7 +335,7 @@ final class TouchGestureHandler {
         if !inActiveSession {
             let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
-                if case .pending(let startPoint, _, _, let maxDisp, _) = self.gestureState {
+                if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
                     if maxDisp < self.tapSlopThreshold && !self.isScrollSessionActive {
                         // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
                         self.gestureState = .longPressArmed(point: startPoint)
@@ -344,7 +371,7 @@ final class TouchGestureHandler {
                 postScrollEvent(deltaX: dx, deltaY: dy, at: point, phase: .began)
             }
 
-        case .pending(let startPoint, let startNorm, let startTime, let maxDisp, let isTitleBar):
+        case .pending(let startPoint, let startNorm, let targetBounds, let startTime, let maxDisp, let isTitleBar):
             let dx = point.x - startPoint.x
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
@@ -353,6 +380,18 @@ final class TouchGestureHandler {
 
             if distance >= threshold {
                 cancelLongPressTimer()
+
+                // 【右側邊緣向內滑開通知中心】：觸碰起始於螢幕最右側（norm.x >= 0.85）且向左滑動
+                if isRightEdgeNotificationCenterEnabled && startNorm.x >= rightEdgeZoneRatio && dx < 0 && -dx > abs(dy) * 0.5 {
+                    if -dx >= rightEdgeSwipeDistanceThreshold {
+                        hasScrolledInCurrentGesture = true
+                        gestureState = .edgeGestureTriggered
+                        SystemGestureService.toggleNotificationCenter(on: targetBounds, returnCursorTo: point)
+                    } else {
+                        gestureState = .edgeSwiping(startPoint: startPoint, startNormalized: startNorm, targetBounds: targetBounds)
+                    }
+                    return
+                }
 
                 if isTitleBar {
                     // 【視窗標題列直接拖曳】：手指在標題列滑動，直接進行視窗拖曳！
@@ -374,11 +413,33 @@ final class TouchGestureHandler {
                 gestureState = .pending(
                     startPoint: startPoint,
                     startNormalized: startNorm,
+                    targetBounds: targetBounds,
                     startTime: startTime,
                     maxDisplacement: updatedMaxDisp,
                     isTitleBar: isTitleBar
                 )
             }
+
+        case .edgeSwiping(let startPoint, let startNorm, let targetBounds):
+            let inward = startPoint.x - point.x
+            let dy = point.y - startPoint.y
+
+            if inward >= rightEdgeSwipeDistanceThreshold {
+                hasScrolledInCurrentGesture = true
+                gestureState = .edgeGestureTriggered
+                SystemGestureService.toggleNotificationCenter(on: targetBounds, returnCursorTo: point)
+            } else if inward < -15 || abs(dy) > max(35.0, inward * 1.8) {
+                // 使用者明顯轉為垂直滾動或往外滑出，無縫退回標準雙向滾動
+                hasScrolledInCurrentGesture = true
+                lastScrollTimestamp = timestamp
+                lastScrollPoint = point
+                gestureState = .scrolling(lastPoint: point, velocityTracker: [(timestamp, point)])
+                postScrollEvent(deltaX: point.x - startPoint.x, deltaY: dy, at: point, phase: .began)
+            }
+
+        case .edgeGestureTriggered:
+            // 手勢已觸發，等待抬手，不合成任何位移
+            break
 
         case .longPressArmed(let startPoint):
             let dx = point.x - startPoint.x
@@ -446,7 +507,15 @@ final class TouchGestureHandler {
             lastScrollTimestamp = timestamp
             // 煞車手勢抬起，絕對不觸發任何點擊
 
-        case .pending(let startPoint, _, let startTime, let maxDisp, _):
+        case .edgeSwiping:
+            // 未達滑動觸發門檻即抬起，重設為 idle，不觸發誤點擊
+            gestureState = .idle
+
+        case .edgeGestureTriggered:
+            // 手勢完成抬手，重設為 idle
+            gestureState = .idle
+
+        case .pending(let startPoint, _, _, let startTime, let maxDisp, _):
             gestureState = .idle
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)

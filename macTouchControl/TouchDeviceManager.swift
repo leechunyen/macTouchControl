@@ -497,10 +497,11 @@ final class TouchDeviceManager {
         self.devices[id]?.isTouching = state.isDown
         self.devices[id]?.lastActiveTime = Date()
 
-        // 交付手勢與觸控事件引擎（支援平板滑動、防誤觸輕點、Windows 風格長按右鍵與 2D 慣性）
+        // 交付手勢與觸控事件引擎（支援平板滑動、防誤觸輕點、Windows 風格長按右鍵、側滑開通知中心與 2D 慣性）
         self.gestureHandler.handleTouch(
             point: targetPoint,
             normalized: normPoint,
+            targetBounds: targetBounds,
             isDown: state.isDown,
             tipChanged: tipChanged
         )

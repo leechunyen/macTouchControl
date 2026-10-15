@@ -666,13 +666,34 @@ struct ContentView: View {
 
                     Divider()
 
-                    // 3. 右側邊緣向內滑開通知中心（即將推出）
-                    gesturePreviewRow(
-                        title: loc.t(.gestureNotificationCenterTitle),
-                        description: loc.t(.gestureNotificationCenterDesc),
-                        icon: "sidebar.right",
-                        comingSoonBadge: loc.t(.comingSoonBadge)
-                    )
+                    // 3. 右側邊緣向內滑開通知中心
+                    HStack {
+                        Image(systemName: "sidebar.right")
+                            .font(.title3)
+                            .foregroundColor(gestureHandler.isRightEdgeNotificationCenterEnabled ? .accentColor : .secondary)
+                            .frame(width: 28)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(loc.t(.gestureNotificationCenterTitle))
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text(loc.t(.gestureNotificationCenterDesc))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: Binding<Bool>(
+                            get: { gestureHandler.isRightEdgeNotificationCenterEnabled },
+                            set: { gestureHandler.isRightEdgeNotificationCenterEnabled = $0 }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                    }
+                    .padding(12)
+                    .background(gestureHandler.isRightEdgeNotificationCenterEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
 
                     Divider()
 

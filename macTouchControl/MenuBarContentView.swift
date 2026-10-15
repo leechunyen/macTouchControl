@@ -69,6 +69,17 @@ struct MenuBarContentView: View {
             }
         }
 
+        // 右側邊緣向內滑開通知中心開關
+        Button {
+            gestureHandler.isRightEdgeNotificationCenterEnabled.toggle()
+        } label: {
+            if gestureHandler.isRightEdgeNotificationCenterEnabled {
+                Text("✓ \(loc.t(.menuToggleRightEdgeNotificationCenter))")
+            } else {
+                Text("   \(loc.t(.menuToggleRightEdgeNotificationCenter))")
+            }
+        }
+
         // 開機自動啟動開關 (Auto Start)
         Button {
             autoStartManager.setAutoStart(enabled: !autoStartManager.isAutoStartEnabled)

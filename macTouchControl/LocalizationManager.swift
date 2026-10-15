@@ -103,6 +103,7 @@ enum LocKey {
     case longPressRightClickDesc
     case menuToggleTouchScroll
     case menuToggleLongPressRightClick
+    case menuToggleRightEdgeNotificationCenter
     case gestureNotificationCenterTitle
     case gestureNotificationCenterDesc
     case gestureDockTitle
@@ -301,6 +302,8 @@ final class LocalizationManager {
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
             return "長按觸發右鍵選單 (Windows 風格)"
+        case .menuToggleRightEdgeNotificationCenter:
+            return "右緣向內滑開通知中心"
         case .gestureNotificationCenterTitle:
             return "右緣向內滑動開通知中心"
         case .gestureNotificationCenterDesc:
@@ -448,6 +451,8 @@ final class LocalizationManager {
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:
             return "Long Press for Right-Click (Windows Style)"
+        case .menuToggleRightEdgeNotificationCenter:
+            return "Swipe Right Edge for Notification Center"
         case .gestureNotificationCenterTitle:
             return "Swipe In from Right for Notification Center"
         case .gestureNotificationCenterDesc:
