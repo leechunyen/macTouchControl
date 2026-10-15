@@ -164,8 +164,10 @@ final class TouchGestureHandler {
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
         case scrolling(lastPoint: CGPoint, velocityTracker: [(TimeInterval, CGPoint)])
-        /// 定點長按已就緒（按著後原地放開為右鍵；按著移動轉為 click hold 直到放開）
+        /// 定點長按已就緒（在 0.30s~0.75s 內原地放開算右鍵；手指移動轉為拖曳）
         case longPressArmed(point: CGPoint)
+        /// 定點按住超過 0.75s 不放開，已進入持續 Click Hold（例如 YouTube 2x 加速、長按按鈕），直到放開
+        case clickHolding(point: CGPoint)
         /// 正在進行物件或視窗拖曳（滑鼠左鍵持續按住直到放開）
         case dragging(lastPoint: CGPoint)
         /// 正在進行右側邊緣向內滑動手勢
@@ -175,6 +177,8 @@ final class TouchGestureHandler {
     }
 
     private var gestureState: GestureState = .idle
+    private var armTimer: Timer?
+    private var holdTimer: Timer?
     private var longPressTimer: Timer?
 
     // MARK: - Precision Thresholds & Click Lock Engine
@@ -210,8 +214,14 @@ final class TouchGestureHandler {
         isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
     }
 
-    /// 定點長按門檻（0.32 秒）：極速靈敏，按著後放開算右鍵，按著不放開移動算 click hold 直到放開
-    private let longPressThreshold: TimeInterval = 0.32
+    /// 輕點判定與右鍵就緒門檻（0.30 秒）：手指放開前小於 0.3s 為單擊，達標進入右鍵就緒
+    private let shortTapThreshold: TimeInterval = 0.30
+
+    /// 定點持續 Click Hold 門檻（0.75 秒）：按住超過 0.75 秒不放開自動觸發持續左鍵按住（如 YouTube 2x 加速）
+    private let clickHoldThreshold: TimeInterval = 0.75
+
+    /// 向下相容長按門檻別名
+    private var longPressThreshold: TimeInterval { shortTapThreshold }
 
     /// 有效輕點最短時間 (5ms)，過濾極端硬體噪訊，不吞掉極快點擊
     private let minTapDuration: TimeInterval = 0.005
@@ -352,19 +362,39 @@ final class TouchGestureHandler {
             isTitleBar: onTitleBar
         )
 
-        // 排程定點長按計時器（0.32 秒靈敏達標）
-        // 行為標準：點一下算 click、按著後原地放開算右鍵、按著移動算 click hold 直到放開
-        let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
+        cancelAllTimers()
+
+        // 【階梯 1】：0.30 秒進入右鍵就緒（若在 0.30~0.75 秒內原地放開算右鍵）
+        let t1 = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
             guard let self else { return }
             if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
                 if maxDisp < self.tapSlopThreshold {
-                    // 長按就緒：原地放開觸發右鍵；手指移動進入 click hold 拖曳直到放開
                     self.gestureState = .longPressArmed(point: startPoint)
                 }
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.longPressTimer = timer
+        RunLoop.main.add(t1, forMode: .common)
+        self.armTimer = t1
+
+        // 【階梯 2】：0.75 秒按著不放開，觸發持續 Click Hold 直到放開（例如 YouTube 2x 加速）
+        let t2 = Timer.scheduledTimer(withTimeInterval: clickHoldThreshold, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            switch self.gestureState {
+            case .pending(let startPoint, _, _, _, let maxDisp, _):
+                if maxDisp < self.tapSlopThreshold {
+                    self.gestureState = .clickHolding(point: startPoint)
+                    self.postMouseDown(at: startPoint)
+                }
+            case .longPressArmed(let startPoint):
+                // 使用者按住超過 0.75 秒不放開：轉入持續 Click Hold！
+                self.gestureState = .clickHolding(point: startPoint)
+                self.postMouseDown(at: startPoint)
+            default:
+                break
+            }
+        }
+        RunLoop.main.add(t2, forMode: .common)
+        self.holdTimer = t2
     }
 
     private func handleTouchMoved(point: CGPoint, timestamp: TimeInterval) {
@@ -468,14 +498,23 @@ final class TouchGestureHandler {
             let distance = hypot(dx, dy)
 
             if distance >= initialSlopThreshold {
-                // 【按著不放開，手指移動】：轉為 click hold 拖曳直到放開！
+                // 【按著後手指移動】：取消 0.75s 計時器，直接進入拖曳模式直到放開！
+                cancelHoldTimer()
                 gestureState = .dragging(lastPoint: point)
                 postMouseDown(at: startPoint)
                 postMouseDragged(to: point)
             }
 
+        case .clickHolding(let lastPoint):
+            let dx = point.x - lastPoint.x
+            let dy = point.y - lastPoint.y
+            if hypot(dx, dy) >= 2.0 {
+                gestureState = .clickHolding(point: point)
+                postMouseDragged(to: point)
+            }
+
         case .dragging:
-            // 正在進行 click hold 拖曳，發送連續專用左鍵拖曳事件
+            // 正在進行拖曳，發送連續專用左鍵拖曳事件
             gestureState = .dragging(lastPoint: point)
             postMouseDragged(to: point)
 
@@ -548,18 +587,25 @@ final class TouchGestureHandler {
             }
 
         case .longPressArmed(let startPoint):
-            cancelLongPressTimer()
+            cancelAllTimers()
             gestureState = .idle
-            // 【按著後放開算右鍵】：定點長按達標後原地放開手指，觸發右鍵快捷選單！
+            // 【按著後放開算右鍵】：在 0.30s~0.75s 之間原地放開手指，觸發右鍵快捷選單！
             if isLongPressRightClickEnabled {
                 synthesizeRightClick(at: startPoint)
             } else {
                 synthesizeClick(at: startPoint)
             }
 
+        case .clickHolding(let pt):
+            // 【按著不放開算 click hold 直到放開】：按住超過 0.75s 放開（例如 YouTube 加速放開結束）
+            cancelAllTimers()
+            gestureState = .idle
+            postMouseUp(at: pt)
+            WindowFrameCache.shared.refreshAsync()
+
         case .dragging:
-            // 【按著不放開算 click hold 直到放開】：此時手指放開，結束 click hold！
-            cancelLongPressTimer()
+            // 拖曳結束放開
+            cancelAllTimers()
             gestureState = .idle
             postMouseUp(at: point)
             WindowFrameCache.shared.refreshAsync()
@@ -589,9 +635,22 @@ final class TouchGestureHandler {
         }
     }
 
-    private func cancelLongPressTimer() {
+    private func cancelAllTimers() {
+        armTimer?.invalidate()
+        armTimer = nil
+        holdTimer?.invalidate()
+        holdTimer = nil
         longPressTimer?.invalidate()
         longPressTimer = nil
+    }
+
+    private func cancelHoldTimer() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+    }
+
+    private func cancelLongPressTimer() {
+        cancelAllTimers()
     }
 
     // MARK: - 2D Momentum Simulation (支援垂直與水平雙向慣性捲動)

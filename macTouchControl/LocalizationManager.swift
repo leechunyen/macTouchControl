@@ -293,13 +293,13 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "捲動靈敏度"
         case .longPressRightClickTitle:
-            return "長按觸發右鍵與按住拖曳 (Windows / iPad 風格)"
+            return "長按右鍵與按住拖曳 / 加速 (Windows / iPad 風格)"
         case .longPressRightClickDesc:
-            return "點一下為 Click；定點按住後原地放開為右鍵；按住不放並移動為 Click Hold 拖曳直到放開"
+            return "點一下為 Click；定點按住約 0.3~0.7 秒放開為右鍵；按住超過 0.8 秒不放為 Click Hold（YouTube 加速 / 長按按鈕）直到放開"
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
-            return "長按觸發右鍵與按住拖曳"
+            return "長按右鍵與按住拖曳 / 加速"
         case .menuToggleRightEdgeNotificationCenter:
             return "右緣向內滑開通知中心"
         case .gestureNotificationCenterTitle:
@@ -438,13 +438,13 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "Scroll Sensitivity"
         case .longPressRightClickTitle:
-            return "Long Press for Right-Click & Drag (Windows / iPad Style)"
+            return "Long Press Right-Click & Drag / Speedup (Windows / iPad Style)"
         case .longPressRightClickDesc:
-            return "Tap for Click; hold still and release for Right-Click; hold and drag for Click-Hold until release"
+            return "Tap for Click; hold 0.3~0.7s & release for Right-Click; hold >0.8s for Click-Hold (YouTube speedup / button hold) until release"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:
-            return "Long Press for Right-Click & Drag"
+            return "Long Press Right-Click & Drag / Speedup"
         case .menuToggleRightEdgeNotificationCenter:
             return "Swipe Right Edge for Notification Center"
         case .gestureNotificationCenterTitle:
