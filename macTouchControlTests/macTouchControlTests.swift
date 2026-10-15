@@ -82,6 +82,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.mainDisplayBadge) == "Main")
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
         #expect(manager.t(.longPressRightClickTitle) == "Long Press Right-Click & Drag / Speedup (Windows / iPad Style)")
+        #expect(manager.t(.longPressVisualRingTitle) == "Show Long-Press Countdown Ring")
         #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press Right-Click & Drag / Speedup")
         #expect(manager.t(.identifyDisplaysButton) == "Identify")
 
@@ -99,6 +100,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
         #expect(manager.t(.longPressRightClickTitle) == "長按右鍵與按住拖曳 / 加速 (Windows / iPad 風格)")
+        #expect(manager.t(.longPressVisualRingTitle) == "顯示長按倒數光圈動畫")
         #expect(manager.t(.menuToggleLongPressRightClick) == "長按右鍵與按住拖曳 / 加速")
     }
 
@@ -241,11 +243,12 @@ struct MacTouchControlTests {
 
         let handler = TouchGestureHandler()
 
-        // 驗證核心預設值：平板滑動體驗、自然滑動方向、長按觸發右鍵預設必須開啟
+        // 驗證核心預設值：平板滑動體驗、自然滑動方向、長按觸發右鍵、倒數光圈動畫預設必須開啟
         #expect(handler.isTouchScrollEnabled == true)
         #expect(handler.naturalScroll == true)
         #expect(handler.scrollSensitivity == 1.0)
         #expect(handler.isLongPressRightClickEnabled == true)
+        #expect(handler.isLongPressVisualRingEnabled == true)
 
         // 測試使用者自訂開關長按右鍵功能
         handler.isLongPressRightClickEnabled = false

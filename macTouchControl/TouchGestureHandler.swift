@@ -146,6 +146,14 @@ final class TouchGestureHandler {
         }
     }
 
+    /// 是否在長按時於觸控位置顯示倒數光圈動畫（預設開啟）
+    var isLongPressVisualRingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(isLongPressVisualRingEnabled, forKey: "macTouchControl.longPressVisualRingEnabled")
+            UserDefaults.standard.synchronize()
+        }
+    }
+
     /// 是否啟用右邊緣向內側滑開通知中心（預設開啟）
     var isRightEdgeNotificationCenterEnabled: Bool = true {
         didSet {
@@ -214,11 +222,16 @@ final class TouchGestureHandler {
         isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
     }
 
-    /// 輕點判定與右鍵就緒門檻（0.30 秒）：手指放開前小於 0.3s 為單擊，達標進入右鍵就緒
-    private let shortTapThreshold: TimeInterval = 0.30
+    /// 輕點判定與右鍵光圈倒數開始門檻（0.22 秒）：快速輕點 < 0.22s 為 Click；超過則開始倒數光圈
+    private let shortTapThreshold: TimeInterval = 0.22
 
-    /// 定點持續 Click Hold 門檻（0.75 秒）：按住超過 0.75 秒不放開自動觸發持續左鍵按住（如 YouTube 2x 加速）
-    private let clickHoldThreshold: TimeInterval = 0.75
+    /// 定點持續 Click Hold 門檻（0.68 秒）：按住超過 0.68 秒光圈倒數完畢，開始 Click Hold（例如 YouTube 2x 加速）
+    private let clickHoldThreshold: TimeInterval = 0.68
+
+    /// 光圈倒數動畫時長（0.68 - 0.22 = 0.46 秒）
+    private var ringDuration: TimeInterval {
+        clickHoldThreshold - shortTapThreshold
+    }
 
     /// 向下相容長按門檻別名
     private var longPressThreshold: TimeInterval { shortTapThreshold }
@@ -276,12 +289,14 @@ final class TouchGestureHandler {
             "macTouchControl.naturalScroll": true,
             "macTouchControl.scrollSensitivity": 1.0,
             "macTouchControl.longPressRightClickEnabled": true,
+            "macTouchControl.longPressVisualRingEnabled": true,
             "macTouchControl.rightEdgeNotificationCenterEnabled": true
         ])
 
         self.isTouchScrollEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.touchScrollEnabled")
         self.naturalScroll = UserDefaults.standard.bool(forKey: "macTouchControl.naturalScroll")
         self.isLongPressRightClickEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled")
+        self.isLongPressVisualRingEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressVisualRingEnabled")
         self.isRightEdgeNotificationCenterEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
 
         let savedSensitivity = UserDefaults.standard.double(forKey: "macTouchControl.scrollSensitivity")
@@ -364,19 +379,22 @@ final class TouchGestureHandler {
 
         cancelAllTimers()
 
-        // 【階梯 1】：0.30 秒進入右鍵就緒（若在 0.30~0.75 秒內原地放開算右鍵）
+        // 【階梯 1】：0.22 秒定點長按就緒，立刻於觸控位置顯示倒數光圈動畫
         let t1 = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
             guard let self else { return }
             if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
                 if maxDisp < self.tapSlopThreshold {
                     self.gestureState = .longPressArmed(point: startPoint)
+                    if self.isLongPressVisualRingEnabled {
+                        LongPressRingOverlay.shared.show(at: startPoint, duration: self.ringDuration)
+                    }
                 }
             }
         }
         RunLoop.main.add(t1, forMode: .common)
         self.armTimer = t1
 
-        // 【階梯 2】：0.75 秒按著不放開，觸發持續 Click Hold 直到放開（例如 YouTube 2x 加速）
+        // 【階梯 2】：0.68 秒倒數光圈跑完，定點按著不放開轉為 Click Hold 直到放開（例如 YouTube 2x 加速）
         let t2 = Timer.scheduledTimer(withTimeInterval: clickHoldThreshold, repeats: false) { [weak self] _ in
             guard let self else { return }
             switch self.gestureState {
@@ -386,7 +404,7 @@ final class TouchGestureHandler {
                     self.postMouseDown(at: startPoint)
                 }
             case .longPressArmed(let startPoint):
-                // 使用者按住超過 0.75 秒不放開：轉入持續 Click Hold！
+                // 光圈倒數結束，使用者按著不放開：進入持續 Click Hold！
                 self.gestureState = .clickHolding(point: startPoint)
                 self.postMouseDown(at: startPoint)
             default:
@@ -498,8 +516,9 @@ final class TouchGestureHandler {
             let distance = hypot(dx, dy)
 
             if distance >= initialSlopThreshold {
-                // 【按著後手指移動】：取消 0.75s 計時器，直接進入拖曳模式直到放開！
+                // 【按著後手指移動】：隱藏光圈並取消持留計時器，直接進入拖曳模式直到放開！
                 cancelHoldTimer()
+                LongPressRingOverlay.shared.hide()
                 gestureState = .dragging(lastPoint: point)
                 postMouseDown(at: startPoint)
                 postMouseDragged(to: point)
@@ -642,6 +661,7 @@ final class TouchGestureHandler {
         holdTimer = nil
         longPressTimer?.invalidate()
         longPressTimer = nil
+        LongPressRingOverlay.shared.hide()
     }
 
     private func cancelHoldTimer() {

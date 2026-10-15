@@ -101,6 +101,8 @@ enum LocKey {
     case scrollSensitivityTitle
     case longPressRightClickTitle
     case longPressRightClickDesc
+    case longPressVisualRingTitle
+    case longPressVisualRingDesc
     case menuToggleTouchScroll
     case menuToggleLongPressRightClick
     case menuToggleRightEdgeNotificationCenter
@@ -295,7 +297,11 @@ final class LocalizationManager {
         case .longPressRightClickTitle:
             return "長按右鍵與按住拖曳 / 加速 (Windows / iPad 風格)"
         case .longPressRightClickDesc:
-            return "點一下為 Click；定點按住約 0.3~0.7 秒放開為右鍵；按住超過 0.8 秒不放為 Click Hold（YouTube 加速 / 長按按鈕）直到放開"
+            return "點一下為 Click；定點按住倒數光圈中放開為右鍵；光圈跑完不放開為 Click Hold（YouTube 2x 加速 / 長按按鈕）直到放開"
+        case .longPressVisualRingTitle:
+            return "顯示長按倒數光圈動畫"
+        case .longPressVisualRingDesc:
+            return "定點長按時在手指接觸位置顯示環形進度條：倒數中放開觸發右鍵，倒數完成後觸發持續按住"
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
@@ -440,7 +446,11 @@ final class LocalizationManager {
         case .longPressRightClickTitle:
             return "Long Press Right-Click & Drag / Speedup (Windows / iPad Style)"
         case .longPressRightClickDesc:
-            return "Tap for Click; hold 0.3~0.7s & release for Right-Click; hold >0.8s for Click-Hold (YouTube speedup / button hold) until release"
+            return "Tap for Click; release during animated ring countdown for Right-Click; hold past completion for Click-Hold (YouTube speedup) until release"
+        case .longPressVisualRingTitle:
+            return "Show Long-Press Countdown Ring"
+        case .longPressVisualRingDesc:
+            return "Shows an animated circular countdown at the touch point: release during countdown for Right-Click, hold past completion for Click-Hold"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:

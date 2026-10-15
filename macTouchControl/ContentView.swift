@@ -656,6 +656,35 @@ struct ContentView: View {
                     .background(gestureHandler.isLongPressRightClickEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
                     .cornerRadius(8)
 
+                    if gestureHandler.isLongPressRightClickEnabled {
+                        HStack(alignment: .center) {
+                            Image(systemName: "circle.dashed")
+                                .font(.system(size: 16))
+                                .foregroundColor(.accentColor)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(loc.t(.longPressVisualRingTitle))
+                                    .font(.subheadline)
+                                Text(loc.t(.longPressVisualRingDesc))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Toggle("", isOn: Binding<Bool>(
+                                get: { gestureHandler.isLongPressVisualRingEnabled },
+                                set: { gestureHandler.isLongPressVisualRingEnabled = $0 }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                        .padding(.leading, 12)
+                        .padding(.trailing, 8)
+                        .padding(.vertical, 4)
+                    }
+
                     Divider()
 
                     // 3. 右側邊緣向內滑開通知中心
