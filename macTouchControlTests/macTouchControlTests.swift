@@ -11,6 +11,7 @@ import CoreGraphics
 import AppKit
 @testable import macTouchControl
 
+@Suite(.serialized)
 struct MacTouchControlTests {
 
     @Test("測試語言自動檢測與Fallback機制")
@@ -329,6 +330,7 @@ struct MacTouchControlTests {
     @MainActor
     func testWindowDraggingAndPressHoldDrag() {
         let handler = TouchGestureHandler()
+        handler.isTouchScrollEnabled = true
         let norm = CGPoint(x: 0.5, y: 0.5)
 
         // 1. 模擬快速滑動（捲動）
@@ -383,7 +385,17 @@ struct MacTouchControlTests {
         handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), isDown: false, tipChanged: true)
         handler.isRightEdgeNotificationCenterEnabled = true
 
-        // 4. 測試通知中心呼叫
+        // 4. 測試當 isTouchScrollEnabled = false（平板滑動模式關閉）時，側滑依然能正確觸發通知中心！
+        handler.isTouchScrollEnabled = false
+        handler.isRightEdgeNotificationCenterEnabled = true
+        handler.handleTouch(point: rightEdgeStart, normalized: rightEdgeNorm, targetBounds: targetBounds, isDown: true, tipChanged: true)
+        #expect(!handler.hasScrolledInCurrentGesture)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), targetBounds: targetBounds, isDown: true, tipChanged: false)
+        #expect(handler.hasScrolledInCurrentGesture)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), targetBounds: targetBounds, isDown: false, tipChanged: true)
+        handler.isTouchScrollEnabled = true
+
+        // 5. 測試通知中心呼叫
         SystemGestureService.toggleNotificationCenter()
     }
 

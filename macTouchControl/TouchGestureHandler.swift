@@ -317,12 +317,6 @@ final class TouchGestureHandler {
         fractionalRemainderX = 0
         fractionalRemainderY = 0
 
-        guard isTouchScrollEnabled else {
-            // 若關閉平板滑動模式，走傳統直接滑鼠拖曳
-            postMouseDown(at: point)
-            return
-        }
-
         // 若前次處於慣性滑行中，本次落指立即發揮煞車作用
         if wasMomentumActive {
             lastScrollTimestamp = timestamp
@@ -360,11 +354,6 @@ final class TouchGestureHandler {
     }
 
     private func handleTouchMoved(point: CGPoint, timestamp: TimeInterval) {
-        guard isTouchScrollEnabled else {
-            postMouseDragged(to: point)
-            return
-        }
-
         switch gestureState {
         case .idle:
             break
@@ -405,13 +394,14 @@ final class TouchGestureHandler {
                     return
                 }
 
-                if isTitleBar {
-                    // 【視窗標題列直接拖曳】：手指在標題列滑動，直接進行視窗拖曳！
+                if isTitleBar || !isTouchScrollEnabled {
+                    // 【視窗標題列直接拖曳，或關閉平板捲動時的標準滑鼠拖曳模式】：
+                    // 手指滑動直接進行視窗或物件拖曳！
                     gestureState = .dragging(lastPoint: point)
                     postMouseDown(at: startPoint)
                     postMouseDragged(to: point)
                 } else {
-                    // 【內容區域滑動】：超過極小門檻 (2.0pt)，無延遲切入雙向平板滑動捲動模式
+                    // 【平板雙向捲動模式】：超過門檻，無延遲切入雙向平板滑動捲動模式
                     hasScrolledInCurrentGesture = true
                     lastScrollTimestamp = timestamp
                     lastScrollPoint = point
@@ -504,11 +494,6 @@ final class TouchGestureHandler {
 
     private func handleTouchUp(point: CGPoint, timestamp: TimeInterval) {
         cancelLongPressTimer()
-
-        guard isTouchScrollEnabled else {
-            postMouseUp(at: point)
-            return
-        }
 
         switch gestureState {
         case .idle:
