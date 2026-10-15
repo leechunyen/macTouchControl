@@ -212,8 +212,11 @@ final class TouchGestureHandler {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 手指輕點與長按防抖有效位移容許範圍 (18.0pt)：適應手指指腹接觸面自然微移，杜絕誤當微小滑動
-    private let tapSlopThreshold: CGFloat = 18.0
+    /// 手指輕點與長按防抖有效位移容許範圍 (20.0pt)：適應手指指腹接觸面自然微移，杜絕誤當微小滑動
+    private let tapSlopThreshold: CGFloat = 20.0
+
+    /// 長按光圈就緒後的拖曳門檻 (28.0pt)：在此範圍內的指腹微移與抬手跳變皆視為定點長按，杜絕誤入拖曳模式
+    private let longPressDragThreshold: CGFloat = 28.0
 
     /// 冷啟動時的滑動門檻 (14.0pt，位移超過 14pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊，且不誤傷定點長按)
     private let initialSlopThreshold: CGFloat = 14.0
@@ -520,8 +523,8 @@ final class TouchGestureHandler {
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
 
-            if distance >= initialSlopThreshold {
-                // 【按著後手指移動】：隱藏光圈並取消持留計時器，直接進入拖曳模式直到放開！
+            if distance >= longPressDragThreshold {
+                // 【按著後明確移動】：位移大於 28pt 判定為刻意拖曳，隱藏光圈並取消持留計時器，轉入拖曳模式直到放開
                 cancelHoldTimer()
                 LongPressRingOverlay.shared.hide()
                 gestureState = .dragging(lastPoint: point)
@@ -604,10 +607,16 @@ final class TouchGestureHandler {
 
             if !hasScrolledInCurrentGesture &&
                elapsed >= minTapDuration &&
-               elapsed < longPressThreshold &&
                liftDist < allowedSlop &&
                maxDisp < allowedSlop {
-                synthesizeClick(at: startPoint)
+                if elapsed < shortTapThreshold {
+                    synthesizeClick(at: startPoint)
+                } else if isLongPressRightClickEnabled {
+                    // 若按壓已達標長按時間（如計時器因 RunLoop 些微延遲尚未切換狀態），放開時堅決觸發右鍵
+                    synthesizeRightClick(at: startPoint)
+                } else {
+                    synthesizeClick(at: startPoint)
+                }
             }
 
         case .longPressArmed(let startPoint):
@@ -904,7 +913,9 @@ final class TouchGestureHandler {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         guard isLongPressRightClickEnabled else { return }
 
-        updateWindowServerPointer(at: point)
+        // 先精準定位游標並確保目標視窗焦點就緒
+        CGWarpMouseCursorPosition(point)
+        activateAppUnder(point: point)
 
         guard let down = CGEvent(
             mouseEventSource: eventSource,
@@ -925,10 +936,14 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 1)
 
+        down.setDoubleValueField(.mouseEventPressure, value: 1.0)
+        up.setDoubleValueField(.mouseEventPressure, value: 0.0)
+
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
         down.post(tap: .cghidEventTap)
+        usleep(15_000) // 15ms 保持脈衝間隔，確保 WindowServer 與 AppKit (NSMenu) 能完整捕捉右鍵按下與彈起
         up.post(tap: .cghidEventTap)
     }
 
