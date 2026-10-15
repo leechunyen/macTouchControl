@@ -146,14 +146,6 @@ final class TouchGestureHandler {
         }
     }
 
-    /// 是否在長按時於觸控位置顯示倒數光圈動畫（預設開啟）
-    var isLongPressVisualRingEnabled: Bool = true {
-        didSet {
-            UserDefaults.standard.set(isLongPressVisualRingEnabled, forKey: "macTouchControl.longPressVisualRingEnabled")
-            UserDefaults.standard.synchronize()
-        }
-    }
-
     /// 長按倒數時間長度（範圍 0.40 ~ 1.50 秒，預設 0.65 秒，支援使用者個人化調整）
     var longPressDuration: Double = 0.65 {
         didSet {
@@ -303,7 +295,6 @@ final class TouchGestureHandler {
             "macTouchControl.naturalScroll": true,
             "macTouchControl.scrollSensitivity": 1.0,
             "macTouchControl.longPressRightClickEnabled": true,
-            "macTouchControl.longPressVisualRingEnabled": true,
             "macTouchControl.longPressDuration": 0.65,
             "macTouchControl.rightEdgeNotificationCenterEnabled": true
         ])
@@ -311,7 +302,6 @@ final class TouchGestureHandler {
         self.isTouchScrollEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.touchScrollEnabled")
         self.naturalScroll = UserDefaults.standard.bool(forKey: "macTouchControl.naturalScroll")
         self.isLongPressRightClickEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled")
-        self.isLongPressVisualRingEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressVisualRingEnabled")
         let savedDuration = UserDefaults.standard.double(forKey: "macTouchControl.longPressDuration")
         self.longPressDuration = savedDuration > 0 ? savedDuration : 0.65
         self.isRightEdgeNotificationCenterEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
@@ -402,9 +392,7 @@ final class TouchGestureHandler {
             if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
                 if maxDisp < self.tapSlopThreshold {
                     self.gestureState = .longPressArmed(point: startPoint)
-                    if self.isLongPressVisualRingEnabled {
-                        LongPressRingOverlay.shared.show(at: startPoint, duration: self.ringDuration)
-                    }
+                    LongPressRingOverlay.shared.show(at: startPoint, duration: self.ringDuration)
                 }
             }
         }

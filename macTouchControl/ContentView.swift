@@ -657,33 +657,6 @@ struct ContentView: View {
                     .cornerRadius(8)
 
                     if gestureHandler.isLongPressRightClickEnabled {
-                        HStack(alignment: .center) {
-                            Image(systemName: "circle.dashed")
-                                .font(.system(size: 16))
-                                .foregroundColor(.accentColor)
-                                .frame(width: 24)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(loc.t(.longPressVisualRingTitle))
-                                    .font(.subheadline)
-                                Text(loc.t(.longPressVisualRingDesc))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-
-                            Spacer()
-
-                            Toggle("", isOn: Binding<Bool>(
-                                get: { gestureHandler.isLongPressVisualRingEnabled },
-                                set: { gestureHandler.isLongPressVisualRingEnabled = $0 }
-                            ))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                        }
-                        .padding(.leading, 12)
-                        .padding(.trailing, 8)
-                        .padding(.vertical, 4)
-
                         HStack(alignment: .center, spacing: 12) {
                             Image(systemName: "timer")
                                 .font(.system(size: 16))

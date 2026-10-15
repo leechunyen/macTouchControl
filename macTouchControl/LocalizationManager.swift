@@ -101,8 +101,6 @@ enum LocKey {
     case scrollSensitivityTitle
     case longPressRightClickTitle
     case longPressRightClickDesc
-    case longPressVisualRingTitle
-    case longPressVisualRingDesc
     case longPressDurationTitle
     case menuToggleTouchScroll
     case menuToggleLongPressRightClick
@@ -299,10 +297,6 @@ final class LocalizationManager {
             return "長按右鍵與按住拖曳 (Windows / iPad 風格)"
         case .longPressRightClickDesc:
             return "點一下為 Click；定點按住倒數光圈中放開為右鍵；光圈跑完不放開為 Click Hold 直到放開"
-        case .longPressVisualRingTitle:
-            return "顯示長按倒數光圈動畫"
-        case .longPressVisualRingDesc:
-            return "定點長按時在手指接觸位置顯示環形進度條：倒數中放開觸發右鍵，倒數完成後觸發持續按住"
         case .longPressDurationTitle:
             return "長按倒數時間"
         case .menuToggleTouchScroll:
@@ -450,10 +444,6 @@ final class LocalizationManager {
             return "Long Press Right-Click & Drag (Windows / iPad Style)"
         case .longPressRightClickDesc:
             return "Tap for Click; release during animated ring countdown for Right-Click; hold past completion for Click Hold until release"
-        case .longPressVisualRingTitle:
-            return "Show Long-Press Countdown Ring"
-        case .longPressVisualRingDesc:
-            return "Shows an animated circular countdown at the touch point: release during countdown for Right-Click, hold past completion for Click Hold"
         case .longPressDurationTitle:
             return "Long-Press Duration"
         case .menuToggleTouchScroll:
