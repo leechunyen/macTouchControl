@@ -627,38 +627,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    // 2. 長按持續按住（0.3 秒，滑鼠左鍵持續按住，支援拖曳）
-                    HStack(alignment: .center) {
-                        Image(systemName: "hand.point.up.left.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.accentColor)
-                            .frame(width: 24)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(loc.t(.longPressHoldTitle))
-                                .font(.body)
-                                .fontWeight(.medium)
-                            Text(loc.t(.longPressHoldDesc))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: Binding<Bool>(
-                            get: { gestureHandler.isLongPressHoldEnabled },
-                            set: { gestureHandler.isLongPressHoldEnabled = $0 }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                    }
-                    .padding(12)
-                    .background(gestureHandler.isLongPressHoldEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
-                    .cornerRadius(8)
-
-                    Divider()
-
-                    // 3. 定點長按觸發右鍵（0.8 秒時間階梯，與 0.3 秒長按按住和平共存）
+                    // 2. Windows / iPad 風格長按觸發右鍵與按住拖曳（點一下Click、按住放開右鍵、按住移動拖曳）
                     HStack(alignment: .center) {
                         Image(systemName: "cursorarrow.click.2")
                             .font(.system(size: 20))
