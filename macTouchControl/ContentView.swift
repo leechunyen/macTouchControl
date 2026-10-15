@@ -538,14 +538,6 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Text(gestureHandler.isTouchScrollEnabled ? loc.t(.nextPhaseBadge) : loc.t(.comingSoonBadge))
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(gestureHandler.isTouchScrollEnabled ? Color.green.opacity(0.12) : Color.purple.opacity(0.12))
-                        .foregroundColor(gestureHandler.isTouchScrollEnabled ? .green : .purple)
-                        .cornerRadius(6)
-
                     Image(systemName: isGesturesSectionExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.secondary)
