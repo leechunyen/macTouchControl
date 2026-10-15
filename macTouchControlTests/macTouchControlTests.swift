@@ -179,6 +179,8 @@ struct MacTouchControlTests {
         )
         let fallbackMatched = store.targetDisplay(for: "dev_touch_1", availableDisplays: [reconnectedDisplay])
         #expect(fallbackMatched?.id == 202)
+        // 驗證透過 reconcileMappings 進行狀態與磁碟持久化調和，保持 targetDisplay 為純讀取函數
+        store.reconcileMappings(with: [reconnectedDisplay])
         #expect(store.mappings["dev_touch_1"]?.targetDisplayID == 202)
 
         // 測試解除綁定

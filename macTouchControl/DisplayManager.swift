@@ -101,6 +101,9 @@ final class DisplayManager {
 
         self.displays = detectedDisplays
         self.isMirroringActive = anyMirror
+
+        // 異步安全調和因螢幕重新插拔所變更的 DisplayID，杜絕在 SwiftUI View Body 渲染期產生副作用
+        MappingStore.shared.reconcileMappings(with: detectedDisplays)
     }
 
     func display(for id: CGDirectDisplayID) -> DisplayInfo? {

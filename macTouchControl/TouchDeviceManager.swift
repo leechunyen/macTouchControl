@@ -435,20 +435,14 @@ final class TouchDeviceManager {
                 state.pendingXUpdate = true
                 deviceStates[id] = state
 
-                // 採用 commonModes 並即刻喚醒 RunLoop，保證在事件追蹤（Tracking）期間絕不延遲滯留
-                let runLoop = CFRunLoopGetMain()
-                CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { [weak self] in
+                // 若只有 X 軸單獨更新（如純水平微移），於 Main 佇列下一拍確認並派發，杜絕競態衝突與重複派發
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    MainActor.assumeIsolated {
-                        var curState = self.deviceStates[id] ?? state
-                        if curState.pendingXUpdate {
-                            curState.pendingXUpdate = false
-                            self.deviceStates[id] = curState
-                            self.processTouchInput(id: id, state: curState, tipChanged: false)
-                        }
-                    }
+                    guard var curState = self.deviceStates[id], curState.pendingXUpdate else { return }
+                    curState.pendingXUpdate = false
+                    self.deviceStates[id] = curState
+                    self.processTouchInput(id: id, state: curState, tipChanged: false)
                 }
-                CFRunLoopWakeUp(runLoop)
                 return
             } else if usage == kHIDUsage_GD_Y {
                 state.rawY = Double(intVal)

@@ -26,7 +26,22 @@ final class PermissionManager {
 
     init() {
         checkPermissions()
-        startPolling()
+        if !isAllGranted {
+            startPolling()
+        }
+
+        // 當使用者從「系統設定」授權後返回本 App 時，立即主動複查權限，無需持續輪詢
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.checkPermissions()
+            if self.isAllGranted {
+                self.stopPolling()
+            }
+        }
     }
 
     func checkPermissions() {
@@ -80,12 +95,20 @@ final class PermissionManager {
 
     /// 動態輪詢權限狀態，以便使用者在系統設定勾選後 UI 能即時自動更新
     func startPolling() {
+        // 若所有權限已具備，無需啟動輪詢
+        if isAllGranted { return }
+
         pollTask?.cancel()
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 guard let self else { break }
                 self.checkPermissions()
+                // 一旦全部權限皆已取得，立即停止背景輪詢，杜絕 CPU 能耗浪費
+                if self.isAllGranted {
+                    self.stopPolling()
+                    break
+                }
             }
         }
     }

@@ -71,11 +71,30 @@ final class AutoStartManager {
 // MARK: - App Delegate & Window Lifecycle Management
 
 /// 掌管主視窗生命週期、Dock 圖示動態顯隱與開機靜默啟動行為
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    static let shared = AppDelegate()
+    private static weak var currentInstance: AppDelegate?
+
+    static var shared: AppDelegate {
+        if let instance = currentInstance {
+            return instance
+        }
+        if let appDel = NSApp.delegate as? AppDelegate {
+            currentInstance = appDel
+            return appDel
+        }
+        let fallback = AppDelegate()
+        currentInstance = fallback
+        return fallback
+    }
 
     weak var mainWindow: NSWindow?
     private var isFirstLaunchCheck = true
+
+    override init() {
+        super.init()
+        AppDelegate.currentInstance = self
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupApplicationIcon()

@@ -64,7 +64,7 @@ final class WindowFrameCache: @unchecked Sendable {
         }
     }
 
-    /// 0 毫秒高速判定落指點是否位於任何視窗標題列（排除左上角交通燈）
+    /// 0 毫秒高速判定落指點是否位於任何視窗標題列（排除左上角交通燈，並支援 macOS 15+ 輔助功能降級判定）
     func isTitleBar(at point: CGPoint) -> Bool {
         // 定期背景更新
         if ProcessInfo.processInfo.systemUptime - lastUpdateTime > 1.0 {
@@ -75,12 +75,58 @@ final class WindowFrameCache: @unchecked Sendable {
         let rects = titleBarRects
         lock.unlock()
 
-        for rect in rects {
-            if rect.contains(point) {
-                // 排除視窗左上角紅黃綠交通燈按鈕區域（寬約 75pt）
-                let trafficLights = CGRect(x: rect.origin.x, y: rect.origin.y, width: 75, height: rect.height)
-                if !trafficLights.contains(point) {
-                    return true
+        // 1. 若 CGWindowList 獲取到有效標題列矩形（macOS 14 或具備螢幕錄製權限），以 0ms 快取命中
+        if !rects.isEmpty {
+            for rect in rects {
+                if rect.contains(point) {
+                    // 排除視窗左上角紅黃綠交通燈按鈕區域（寬約 75pt）
+                    let trafficLights = CGRect(x: rect.origin.x, y: rect.origin.y, width: 75, height: rect.height)
+                    if !trafficLights.contains(point) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        // 2. 在 macOS 15+ Sequoia 上若無螢幕錄製權限，自動降級透過輔助功能（AXUIElement）精準判定
+        return checkAccessibilityTitleBar(at: point)
+    }
+
+    private func checkAccessibilityTitleBar(at point: CGPoint) -> Bool {
+        guard PermissionManager.shared.isAccessibilityGranted else { return false }
+        let systemWide = AXUIElementCreateSystemWide()
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element) == .success,
+              let elem = element else {
+            return false
+        }
+
+        var roleValue: AnyObject?
+        if AXUIElementCopyAttributeValue(elem, kAXRoleAttribute as CFString, &roleValue) == .success,
+           let role = roleValue as? String {
+            if role == "AXToolbar" || role == "AXSplitter" || role == "AXGroup" || role == "AXWindow" {
+                var windowElem: AXUIElement = elem
+                if role != "AXWindow" {
+                    var winVal: AnyObject?
+                    if AXUIElementCopyAttributeValue(elem, kAXWindowAttribute as CFString, &winVal) == .success,
+                       let w = winVal {
+                        windowElem = (w as! AXUIElement)
+                    }
+                }
+                var posValue: AnyObject?
+                var sizeValue: AnyObject?
+                if AXUIElementCopyAttributeValue(windowElem, kAXPositionAttribute as CFString, &posValue) == .success,
+                   AXUIElementCopyAttributeValue(windowElem, kAXSizeAttribute as CFString, &sizeValue) == .success {
+                    var origin = CGPoint.zero
+                    var size = CGSize.zero
+                    AXValueGetValue(posValue as! AXValue, .cgPoint, &origin)
+                    AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+                    let titleBarRect = CGRect(x: origin.x, y: origin.y, width: size.width, height: min(size.height, 52.0))
+                    let trafficLights = CGRect(x: origin.x, y: origin.y, width: 75.0, height: min(size.height, 52.0))
+                    if titleBarRect.contains(point) && !trafficLights.contains(point) {
+                        return true
+                    }
                 }
             }
         }
@@ -803,10 +849,19 @@ final class TouchGestureHandler {
         let totalY = deltaY * sign * CGFloat(scrollSensitivity) + fractionalRemainderY
         let totalX = deltaX * sign * CGFloat(scrollSensitivity) + fractionalRemainderX
 
-        fractionalRemainderY = 0
-        fractionalRemainderX = 0
+        let intDeltaY = Int32(round(totalY))
+        let intDeltaX = Int32(round(totalX))
 
-        if phase == .changed && abs(totalY) < 0.1 && abs(totalX) < 0.1 {
+        if phase == .ended || phase == .cancelled {
+            fractionalRemainderY = 0
+            fractionalRemainderX = 0
+        } else {
+            // 保留小數餘數至下一次滾動事件，實現次像素級精確累加
+            fractionalRemainderY = Double(totalY - CGFloat(intDeltaY))
+            fractionalRemainderX = Double(totalX - CGFloat(intDeltaX))
+        }
+
+        if phase == .changed && intDeltaY == 0 && intDeltaX == 0 {
             return
         }
 
@@ -814,8 +869,8 @@ final class TouchGestureHandler {
             scrollWheelEvent2Source: nil,
             units: .pixel,
             wheelCount: 2,
-            wheel1: Int32(round(totalY)),
-            wheel2: Int32(round(totalX)),
+            wheel1: intDeltaY,
+            wheel2: intDeltaX,
             wheel3: 0
         ) else { return }
 
@@ -911,10 +966,11 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
-        // 派發至 .cghidEventTap（硬體級事件隊列，Finder、Dock 與沙盒應用完全信賴並支援 Double Click 啟動）
+        // 派發至 .cghidEventTap（非同步 12ms 脈衝派發，杜絕阻塞主執行緒 RunLoop 與 120Hz 掉幀）
         down.post(tap: .cghidEventTap)
-        usleep(12_000) // 12ms 原子性脈衝，確保按鍵狀態可靠傳遞且不與下次點擊競爭
-        up.post(tap: .cghidEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.012) {
+            up.post(tap: .cghidEventTap)
+        }
     }
 
     /// 合成 Windows 風格長按右鍵選單（原子性同步發送，帶有防誤觸白名單簽名）
@@ -952,8 +1008,10 @@ final class TouchGestureHandler {
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
         down.post(tap: .cghidEventTap)
-        usleep(15_000) // 15ms 保持脈衝間隔，確保 WindowServer 與 AppKit (NSMenu) 能完整捕捉右鍵按下與彈起
-        up.post(tap: .cghidEventTap)
+        // 非同步 15ms 脈衝間隔派發，確保 NSMenu 完整捕捉且主執行緒 0ms 阻塞
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
+            up.post(tap: .cghidEventTap)
+        }
     }
 
     // MARK: - Dedicated Mouse Drag Actions (專用拖曳合成，無任何中斷干擾)

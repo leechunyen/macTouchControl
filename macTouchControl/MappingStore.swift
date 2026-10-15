@@ -64,6 +64,7 @@ final class MappingStore {
         saveMappings()
     }
 
+    /// 純查詢方法（純函數無副作用），保證在 SwiftUI 視圖渲染期間調用不會修改狀態或觸發重繪
     func targetDisplay(for deviceID: String, availableDisplays: [DisplayInfo]) -> DisplayInfo? {
         guard let mapping = mappings[deviceID] else {
             return nil
@@ -76,9 +77,6 @@ final class MappingStore {
 
         // 2. 若螢幕重新插拔導致 DisplayID 變更，則以螢幕名稱精確匹配
         if let nameMatch = availableDisplays.first(where: { $0.name == mapping.targetDisplayName }) {
-            // 同步更新最新 DisplayID
-            mappings[deviceID]?.targetDisplayID = nameMatch.id
-            saveMappings()
             return nameMatch
         }
 
@@ -87,9 +85,6 @@ final class MappingStore {
         if !trimmedTarget.isEmpty, let looseMatch = availableDisplays.first(where: {
             $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmedTarget
         }) {
-            mappings[deviceID]?.targetDisplayID = looseMatch.id
-            mappings[deviceID]?.targetDisplayName = looseMatch.name
-            saveMappings()
             return looseMatch
         }
 
@@ -99,12 +94,31 @@ final class MappingStore {
             let lower = $0.name.lowercased()
             return lower.contains(trimmedTarget) || trimmedTarget.contains(lower)
         }) {
-            mappings[deviceID]?.targetDisplayID = partialMatch.id
-            mappings[deviceID]?.targetDisplayName = partialMatch.name
-            saveMappings()
             return partialMatch
         }
 
         return nil
+    }
+
+    /// 在螢幕硬體配置變更時（由 DisplayManager 異步觸發），調和並持久化更新螢幕插拔後變動的最新 DisplayID
+    func reconcileMappings(with availableDisplays: [DisplayInfo]) {
+        var didChange = false
+        for (deviceID, mapping) in mappings {
+            // 若 DisplayID 已精確匹配現有螢幕，無需更新
+            if availableDisplays.contains(where: { $0.id == mapping.targetDisplayID }) {
+                continue
+            }
+            // 若 DisplayID 變更但名稱相符，更新 ID
+            if let matched = targetDisplay(for: deviceID, availableDisplays: availableDisplays) {
+                if mapping.targetDisplayID != matched.id || mapping.targetDisplayName != matched.name {
+                    mappings[deviceID]?.targetDisplayID = matched.id
+                    mappings[deviceID]?.targetDisplayName = matched.name
+                    didChange = true
+                }
+            }
+        }
+        if didChange {
+            saveMappings()
+        }
     }
 }
