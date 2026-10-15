@@ -191,7 +191,6 @@ final class TouchGestureHandler {
     private var gestureState: GestureState = .idle
     private var armTimer: Timer?
     private var holdTimer: Timer?
-    private var longPressTimer: Timer?
 
     // MARK: - Precision Thresholds & Click Lock Engine
 
@@ -241,9 +240,6 @@ final class TouchGestureHandler {
     private var ringDuration: TimeInterval {
         clickHoldThreshold - shortTapThreshold
     }
-
-    /// 向下相容長按門檻別名
-    private var longPressThreshold: TimeInterval { shortTapThreshold }
 
     /// 有效輕點最短時間 (5ms)，過濾極端硬體噪訊，不吞掉極快點擊
     private let minTapDuration: TimeInterval = 0.005
@@ -688,8 +684,6 @@ final class TouchGestureHandler {
         armTimer = nil
         holdTimer?.invalidate()
         holdTimer = nil
-        longPressTimer?.invalidate()
-        longPressTimer = nil
         LongPressRingOverlay.shared.hide()
     }
 

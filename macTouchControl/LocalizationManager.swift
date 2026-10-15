@@ -92,8 +92,6 @@ enum LocKey {
 
     // Gestures Section
     case gesturesSectionTitle
-    case nextPhaseBadge
-    case comingSoonBadge
     case gestureScrollTitle
     case gestureScrollDesc
     case naturalScrollTitle
@@ -280,10 +278,6 @@ final class LocalizationManager {
 
         case .gesturesSectionTitle:
             return "觸控手勢與捲動體驗 (Touch Gestures)"
-        case .nextPhaseBadge:
-            return "已啟用"
-        case .comingSoonBadge:
-            return "即將推出"
         case .gestureScrollTitle:
             return "觸控螢幕雙向捲動 (平板 / 手機模式)"
         case .gestureScrollDesc:
@@ -429,10 +423,6 @@ final class LocalizationManager {
 
         case .gesturesSectionTitle:
             return "Touch Gestures & Scrolling"
-        case .nextPhaseBadge:
-            return "Active"
-        case .comingSoonBadge:
-            return "Coming Soon"
         case .gestureScrollTitle:
             return "Touchscreen 2D Scrolling (Tablet Mode)"
         case .gestureScrollDesc:

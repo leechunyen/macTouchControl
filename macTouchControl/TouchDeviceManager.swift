@@ -236,8 +236,6 @@ final class TouchDeviceManager {
 
                 // 6. 左鍵事件攔截（全面攔截未授權的硬體原始拖曳/點擊，統一由 TouchGestureHandler 精準派發，防止與手勢引擎衝突）
                 return nil
-
-                return Unmanaged.passUnretained(event)
             },
             userInfo: observer
         ) else {

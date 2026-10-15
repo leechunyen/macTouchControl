@@ -93,6 +93,7 @@ struct ContentView: View {
             }
             .toggleStyle(.switch)
             .controlSize(.small)
+            .help(loc.t(.autoStartDesc))
             .padding(.trailing, 10)
 
             // 語言切換選擇器
