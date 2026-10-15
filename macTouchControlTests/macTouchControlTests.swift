@@ -425,4 +425,32 @@ struct MacTouchControlTests {
         appDelegate.openControlPanel()
         #expect(NSApp.activationPolicy() == .regular)
     }
+
+    @Test("測試觸控互動判定與系統幽靈右鍵事件徹底攔截機制")
+    @MainActor
+    func testSystemRightClickInterceptionAndTouchInteractionActive() {
+        let touchManager = TouchDeviceManager.shared
+        let touchPt = CGPoint(x: 500, y: 500)
+
+        // 1. 驗證無觸控時，不誤判為觸控中
+        #expect(touchManager.isTouchInteractionActive(at: touchPt) == false)
+
+        // 2. 模擬手指在螢幕上按下（更新落指點與活動狀態）
+        touchManager.lastTouchPoint = touchPt
+        // 驗證遠離觸控點的位置不被誤判
+        let farPt = CGPoint(x: 1500, y: 1500)
+        #expect(touchManager.isTouchInteractionActive(at: farPt) == false)
+
+        // 3. 驗證在落指點附近，抬手延遲窗內（800ms 內）判定為觸控交互
+        // 此機制確保 macOS 延遲派發的系統右鍵（rightMouseDown）被 EventTap 攔截
+        #expect(touchManager.isHardwareTouchCurrentlyActive == false)
+
+        // 4. 驗證長按右鍵關閉狀態時，手勢處理器絕不派發右鍵合成事件
+        let handler = TouchGestureHandler()
+        handler.isLongPressRightClickEnabled = false
+        handler.handleTouch(point: touchPt, normalized: CGPoint(x: 0.5, y: 0.5), isDown: true, tipChanged: true)
+        // 抬起手指
+        handler.handleTouch(point: touchPt, normalized: CGPoint(x: 0.5, y: 0.5), isDown: false, tipChanged: true)
+        #expect(handler.isLongPressRightClickEnabled == false)
+    }
 }

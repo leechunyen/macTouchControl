@@ -23,12 +23,39 @@ final class TouchDeviceManager {
     /// 最近一次收到外接觸控硬體 IOHID 封包的系統時間戳
     private(set) var lastHardwarePacketTime: TimeInterval = 0
 
-    /// 目前是否有任何外接觸控螢幕正處於硬體按壓接觸中（具備 100ms 超時保護機制，防止硬體漏包卡死滑鼠）
+    /// 目前是否有任何外接觸控螢幕正處於硬體按壓接觸中（支援靜態定點長按，防止短時間無位移封包過早超時）
     var isHardwareTouchCurrentlyActive: Bool {
         let isTouching = devices.values.contains { $0.isTouching }
         let isDown = deviceStates.values.contains { $0.isDown }
-        let isRecent = (ProcessInfo.processInfo.systemUptime - lastHardwarePacketTime < 0.10)
+        let isRecent = (ProcessInfo.processInfo.systemUptime - lastHardwarePacketTime < 1.5)
         return (isTouching || isDown) && isRecent
+    }
+
+    /// 判定事件是否源自觸控螢幕的操作（處於觸碰中，或剛在觸碰點附近抬起手指）
+    func isTouchInteractionActive(at location: CGPoint) -> Bool {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let isTouching = devices.values.contains { $0.isTouching }
+        let isDown = deviceStates.values.contains { $0.isDown }
+        let isRecentPacket = (uptime - lastHardwarePacketTime < 1.5)
+
+        // 1. 手指正在按壓螢幕（包含定點長按時靜止無封包狀態）
+        if (isTouching || isDown) && isRecentPacket {
+            return true
+        }
+
+        // 2. 手指剛抬起 800ms 內，若事件座標落在最後觸控點附近（120pt 內），判定為硬體或系統延遲派發的幽靈事件
+        if uptime - lastTouchReleaseTime < 0.80 {
+            if let lastPt = lastTouchPoint {
+                let dist = hypot(location.x - lastPt.x, location.y - lastPt.y)
+                if dist <= 120.0 {
+                    return true
+                }
+            } else {
+                return true
+            }
+        }
+
+        return false
     }
 
     /// 目前外接觸控螢幕在全域座標系中的邊界（供事件隔離）
@@ -151,7 +178,10 @@ final class TouchDeviceManager {
                                 (CGEventMask(1) << CGEventType.leftMouseUp.rawValue) |
                                 (CGEventMask(1) << CGEventType.rightMouseDown.rawValue) |
                                 (CGEventMask(1) << CGEventType.rightMouseDragged.rawValue) |
-                                (CGEventMask(1) << CGEventType.rightMouseUp.rawValue)
+                                (CGEventMask(1) << CGEventType.rightMouseUp.rawValue) |
+                                (CGEventMask(1) << CGEventType.otherMouseDown.rawValue) |
+                                (CGEventMask(1) << CGEventType.otherMouseDragged.rawValue) |
+                                (CGEventMask(1) << CGEventType.otherMouseUp.rawValue)
 
         let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -178,22 +208,34 @@ final class TouchDeviceManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 2. 嚴格區分滑鼠與觸控螢幕：若觸控螢幕當前並無手指按壓，100% 放行滑鼠與觸控板所有操作！
-                guard manager.isHardwareTouchCurrentlyActive else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                // 3. 螢幕空間隔離：若事件座標不在外接觸控螢幕內（例如在 MacBook 內建螢幕），100% 放行，絕不干擾主螢幕滑鼠！
+                // 2. 螢幕空間隔離：若事件座標不在外接觸控螢幕內（例如在 MacBook 內建螢幕），100% 放行，絕不干擾主螢幕滑鼠！
                 let location = event.location
                 guard let touchBounds = manager.activeTouchDisplayBounds, touchBounds.contains(location) else {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 4. 僅在外接觸控螢幕且手指處於接觸中時，攔截未授權的硬體/系統幽靈事件（防止快速滑動時幽靈拖曳洩漏產生衝突卡頓）
-                let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
-                if type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp {
+                // 3. 判斷是否為觸控螢幕交互產生的硬體或系統事件（按壓中或剛抬起於落指點附近）
+                let isFromTouch = manager.isTouchInteractionActive(at: location)
+                guard isFromTouch else {
+                    // 非觸控產生的事件（如桌面上實體滑鼠的操作），100% 放行
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // 4. 右鍵與次鍵事件攔截（長按右鍵沒開就絕對不要出現；有系統事件也要徹底攔截）：
+                // 凡來自觸控螢幕且未經 macTouchControl 白名單認證的系統右鍵（rightMouseDown/rightMouseUp/Control+Click 等），一律攔截捨棄！
+                let isRightClick = (type == .rightMouseDown || type == .rightMouseDragged || type == .rightMouseUp) ||
+                                   (type == .leftMouseDown && event.flags.contains(.maskControl))
+                if isRightClick {
                     return nil
                 }
+
+                // 5. 其他按鍵（如滾輪中鍵等未授權幽靈事件），一律攔截
+                if type == .otherMouseDown || type == .otherMouseDragged || type == .otherMouseUp {
+                    return nil
+                }
+
+                // 6. 左鍵事件攔截（平板滑動模式下，攔截未授權的硬體原始拖曳/點擊，防止與手勢引擎衝突）
+                let isTabletScroll = TouchGestureHandler.shared.isTouchScrollEnabled
                 if isTabletScroll {
                     return nil
                 }
