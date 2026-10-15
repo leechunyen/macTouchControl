@@ -196,14 +196,14 @@ final class TouchGestureHandler {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 手指輕點有效位移容許範圍 (8.0pt)：人體手指指腹接觸面約 10~15mm，落指與抬起時的重心自然微移在 8pt 內均判定為有效點擊，杜絕誤當微小滑動
-    private let tapSlopThreshold: CGFloat = 8.0
+    /// 手指輕點有效位移容許範圍 (14.0pt)：人體手指指腹接觸面約 10~15mm，落指與抬起時的重心自然微移在 14pt 內均判定為有效點擊，杜絕誤當微小滑動
+    private let tapSlopThreshold: CGFloat = 14.0
 
-    /// 冷啟動時的滑動門檻 (7.0pt，位移超過 7pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊)
-    private let initialSlopThreshold: CGFloat = 7.0
+    /// 冷啟動時的滑動門檻 (9.0pt，位移超過 9pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊)
+    private let initialSlopThreshold: CGFloat = 9.0
 
-    /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (3.0pt，連續劃動起步極度跟手)
-    private let activeSessionSlopThreshold: CGFloat = 3.0
+    /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (4.0pt，連續劃動起步極度跟手)
+    private let activeSessionSlopThreshold: CGFloat = 4.0
 
     /// 取得目前手勢應採用的滑動門檻
     private var currentSlopThreshold: CGFloat {
@@ -213,8 +213,8 @@ final class TouchGestureHandler {
     /// 定點長按門檻：長按約 0.38 秒（如同 Windows / Surface 觸控體驗）
     private let longPressThreshold: TimeInterval = 0.38
 
-    /// 有效輕點最短時間 (20ms)，過濾極端硬體噪訊
-    private let minTapDuration: TimeInterval = 0.02
+    /// 有效輕點最短時間 (5ms)，過濾極端硬體噪訊，不吞掉極快點擊
+    private let minTapDuration: TimeInterval = 0.005
 
     /// 慣性摩擦衰減係數（0.91 提供順暢自然且及時停駐的減速體驗）
     private let friction: Double = 0.91
@@ -230,6 +230,18 @@ final class TouchGestureHandler {
 
     /// 右側邊緣向內滑動觸發通知中心的水平位移門檻（30pt）
     private let rightEdgeSwipeDistanceThreshold: CGFloat = 30.0
+
+    // 連續點擊追蹤（支援雙擊開啟檔案/資料夾、三擊選取段落）
+    private var lastClickTime: TimeInterval = 0
+    private var lastClickPoint: CGPoint = .zero
+    private var currentClickCount: Int64 = 1
+
+    // 專屬事件來源，內建白名單簽名
+    private let eventSource: CGEventSource? = {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        source?.userData = TouchGestureHandler.synthesizedEventSignature
+        return source
+    }()
 
     // 慣性滑動計時與速度向量
     private var momentumTimer: Timer?
@@ -666,14 +678,14 @@ final class TouchGestureHandler {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         CGWarpMouseCursorPosition(point)
         guard let moveEvent = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .mouseMoved,
             mouseCursorPosition: point,
             mouseButton: .left
         ) else { return }
         moveEvent.location = point
         moveEvent.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        moveEvent.post(tap: .cghidEventTap)
+        moveEvent.post(tap: .cgSessionEventTap)
     }
 
     /// 發送雙向捲動事件：wheel1 為垂直 (Y)，wheel2 為水平 (X)，精確指定 location 視窗目標
@@ -750,21 +762,20 @@ final class TouchGestureHandler {
         event.post(tap: .cghidEventTap)
     }
 
-    /// 合成標準左鍵輕點（原子性同步發送，帶有防誤觸白名單簽名）
+    /// 合成標準左鍵輕點（原生連擊判定、白名單簽名、派發至登入 Session 杜絕被底層攔截）
     private func synthesizeClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
-        activateAppUnder(point: point)
         updateWindowServerPointer(at: point)
 
         guard let down = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .leftMouseDown,
             mouseCursorPosition: point,
             mouseButton: .left
         ),
         let up = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .leftMouseUp,
             mouseCursorPosition: point,
             mouseButton: .left
@@ -773,19 +784,33 @@ final class TouchGestureHandler {
         down.location = point
         up.location = point
 
-        // 明確將點擊次數固定為 1，防止 macOS 連續點擊計數器判定為 Double Click / Triple Click 誤反白選取文字
-        down.setIntegerValueField(.mouseEventClickState, value: 1)
-        up.setIntegerValueField(.mouseEventClickState, value: 1)
+        // 連續點擊計算（支援雙擊打開檔案、三擊選取文字）
+        let now = ProcessInfo.processInfo.systemUptime
+        let clickInterval = now - lastClickTime
+        let clickDist = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y)
+
+        if clickInterval < 0.45 && clickDist < 30.0 {
+            currentClickCount = min(currentClickCount + 1, 3)
+        } else {
+            currentClickCount = 1
+        }
+        lastClickTime = now
+        lastClickPoint = point
+
+        down.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
+        up.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
 
         // 設置專屬白名單簽名，確保通過 CGEventTap 攔截網
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
-        down.post(tap: .cghidEventTap)
+        // 派發至 .cgSessionEventTap，直達 WindowServer 視窗層，絕不被底層 HID EventTap 阻擋
+        down.post(tap: .cgSessionEventTap)
 
         // 給予微小且真實的點擊維持時間（約 15ms），保證瀏覽器、按鈕動畫與選單可靠捕捉 Click
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
-            up.post(tap: .cghidEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) { [weak self] in
+            guard let _ = self else { return }
+            up.post(tap: .cgSessionEventTap)
         }
     }
 
@@ -797,13 +822,13 @@ final class TouchGestureHandler {
         updateWindowServerPointer(at: point)
 
         guard let down = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .rightMouseDown,
             mouseCursorPosition: point,
             mouseButton: .right
         ),
         let up = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .rightMouseUp,
             mouseCursorPosition: point,
             mouseButton: .right
@@ -818,8 +843,8 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        down.post(tap: .cgSessionEventTap)
+        up.post(tap: .cgSessionEventTap)
     }
 
     // MARK: - Dedicated Mouse Drag Actions (專用拖曳合成，無任何中斷干擾)
@@ -829,7 +854,7 @@ final class TouchGestureHandler {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         CGWarpMouseCursorPosition(point)
         guard let event = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .leftMouseDown,
             mouseCursorPosition: point,
             mouseButton: .left
@@ -837,14 +862,14 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cghidEventTap)
+        event.post(tap: .cgSessionEventTap)
     }
 
     /// 發送連續的滑鼠左鍵拖曳（絕不插入 mouseMoved 或 cursor warp，確保 WindowServer 拖曳不中斷）
     private func postMouseDragged(to point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         guard let event = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .leftMouseDragged,
             mouseCursorPosition: point,
             mouseButton: .left
@@ -852,14 +877,14 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cghidEventTap)
+        event.post(tap: .cgSessionEventTap)
     }
 
     /// 發送滑鼠左鍵釋放（結束視窗或物件拖曳）
     private func postMouseUp(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         guard let event = CGEvent(
-            mouseEventSource: nil,
+            mouseEventSource: eventSource,
             mouseType: .leftMouseUp,
             mouseCursorPosition: point,
             mouseButton: .left
@@ -867,6 +892,6 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cghidEventTap)
+        event.post(tap: .cgSessionEventTap)
     }
 }
