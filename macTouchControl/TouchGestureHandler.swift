@@ -216,17 +216,17 @@ final class TouchGestureHandler {
     /// 有效輕點最短時間 (20ms)，過濾極端硬體噪訊
     private let minTapDuration: TimeInterval = 0.02
 
-    /// 慣性摩擦衰減係數
-    private let friction: Double = 0.94
+    /// 慣性摩擦衰減係數（0.91 提供順暢自然且及時停駐的減速體驗）
+    private let friction: Double = 0.91
 
     /// 觸發慣性捲動的最低釋放速度 (px/s)
-    private let minMomentumVelocity: Double = 60.0
+    private let minMomentumVelocity: Double = 80.0
 
-    /// 慣性停止速度 (px/s)
-    private let stopMomentumVelocity: Double = 6.0
+    /// 慣性停止速度 (px/s，低於此速度立即發送 .end，防止微速無限漂移停不下來)
+    private let stopMomentumVelocity: Double = 12.0
 
-    /// 判定為右邊緣區域的水平正規化門檻（螢幕最右側 15% 邊緣區）
-    private let rightEdgeZoneRatio: CGFloat = 0.85
+    /// 判定為右邊緣區域的水平正規化門檻（螢幕最右側 5% 真正邊框區，防止誤觸截斷頁面正常捲動）
+    private let rightEdgeZoneRatio: CGFloat = 0.95
 
     /// 右側邊緣向內滑動觸發通知中心的水平位移門檻（30pt）
     private let rightEdgeSwipeDistanceThreshold: CGFloat = 30.0
@@ -585,7 +585,7 @@ final class TouchGestureHandler {
         momentumVx = vx * sign * scrollSensitivity
         momentumVy = vy * sign * scrollSensitivity
 
-        postMomentumScrollEvent(deltaX: 0, deltaY: 0, at: point, phase: .began)
+        postMomentumScrollEvent(deltaX: 0, deltaY: 0, at: point, phase: .begin)
 
         let timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { [weak self] t in
             guard let self else {
@@ -613,7 +613,7 @@ final class TouchGestureHandler {
 
         if abs(stepX) > 0.1 || abs(stepY) > 0.1 {
             lastScrollTimestamp = ProcessInfo.processInfo.systemUptime
-            postMomentumScrollEvent(deltaX: CGFloat(stepX), deltaY: CGFloat(stepY), at: lastScrollPoint, phase: .changed)
+            postMomentumScrollEvent(deltaX: CGFloat(stepX), deltaY: CGFloat(stepY), at: lastScrollPoint, phase: .continuous)
         }
     }
 
@@ -624,8 +624,8 @@ final class TouchGestureHandler {
             momentumVx = 0
             momentumVy = 0
             lastScrollTimestamp = ProcessInfo.processInfo.systemUptime
-            // 發送 phase: .ended 立即通知 macOS 系統終止慣性滑行，不延遲後續反向滑動
-            postMomentumScrollEvent(deltaX: 0, deltaY: 0, at: lastScrollPoint, phase: .ended)
+            // 發送 phase: .end 立即通知 macOS 系統終止慣性滑行，不延遲後續反向滑動
+            postMomentumScrollEvent(deltaX: 0, deltaY: 0, at: lastScrollPoint, phase: .end)
         }
     }
 
@@ -677,7 +677,7 @@ final class TouchGestureHandler {
     }
 
     /// 發送雙向捲動事件：wheel1 為垂直 (Y)，wheel2 為水平 (X)，精確指定 location 視窗目標
-    private func postScrollEvent(deltaX: CGFloat, deltaY: CGFloat, at point: CGPoint, phase: NSEvent.Phase) {
+    private func postScrollEvent(deltaX: CGFloat, deltaY: CGFloat, at point: CGPoint, phase: CGScrollPhase) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
         // 【換向即刻反應】：若移動方向與殘存的次像素方向相反，立即歸零殘存次像素，防止舊方向抵消反向位移
@@ -712,6 +712,7 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(CGMomentumScrollPhase.none.rawValue))
 
         // 核心關鍵 2：直接賦予精確浮點像素值，突破 CoreGraphics 預設縮水 10 倍的限制，徹底實現 1:1 精準跟手與速度拉條完全生效！
         event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(totalY))
@@ -723,7 +724,7 @@ final class TouchGestureHandler {
     }
 
     /// 發送雙向慣性捲動事件
-    private func postMomentumScrollEvent(deltaX: CGFloat, deltaY: CGFloat, at point: CGPoint, phase: NSEvent.Phase) {
+    private func postMomentumScrollEvent(deltaX: CGFloat, deltaY: CGFloat, at point: CGPoint, phase: CGMomentumScrollPhase) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
         guard let event = CGEvent(
@@ -737,6 +738,7 @@ final class TouchGestureHandler {
 
         event.location = point
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: 0)
         event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(phase.rawValue))
 
         // 平滑衰減的精確浮點像素值

@@ -351,25 +351,25 @@ struct MacTouchControlTests {
         let handler = TouchGestureHandler.shared
         handler.isRightEdgeNotificationCenterEnabled = true
 
-        // 1. 測試從最右側邊緣（norm.x = 0.88）向內滑動超過門檻（35pt）觸發通知中心手勢，並支援外接目標螢幕
+        // 1. 測試從最右側邊緣（norm.x = 0.97）向內滑動超過門檻（35pt）觸發通知中心手勢，並支援外接目標螢幕
         let targetBounds = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
         let rightEdgeStart = CGPoint(x: -50, y: 500)
-        let rightEdgeNorm = CGPoint(x: 0.88, y: 0.5)
+        let rightEdgeNorm = CGPoint(x: 0.97, y: 0.5)
 
         handler.handleTouch(point: rightEdgeStart, normalized: rightEdgeNorm, targetBounds: targetBounds, isDown: true, tipChanged: true)
         #expect(!handler.hasScrolledInCurrentGesture)
 
         // 向內滑動 10pt（進入 edgeSwiping 階段）
         let inwardStep1 = CGPoint(x: -60, y: 500)
-        handler.handleTouch(point: inwardStep1, normalized: CGPoint(x: 0.875, y: 0.5), targetBounds: targetBounds, isDown: true, tipChanged: false)
+        handler.handleTouch(point: inwardStep1, normalized: CGPoint(x: 0.965, y: 0.5), targetBounds: targetBounds, isDown: true, tipChanged: false)
 
         // 向內滑動 35pt（達成 30pt 門檻，觸發目標外接螢幕通知中心）
         let inwardStep2 = CGPoint(x: -85, y: 500)
-        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.86, y: 0.5), targetBounds: targetBounds, isDown: true, tipChanged: false)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), targetBounds: targetBounds, isDown: true, tipChanged: false)
         #expect(handler.hasScrolledInCurrentGesture)
 
         // 抬起手指，安全重設
-        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.86, y: 0.5), targetBounds: targetBounds, isDown: false, tipChanged: true)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), targetBounds: targetBounds, isDown: false, tipChanged: true)
 
         // 2. 測試右邊緣原地輕點（Click）不應誤判為邊緣滑動
         let edgeTapPoint = CGPoint(x: 1910, y: 500)
@@ -379,8 +379,8 @@ struct MacTouchControlTests {
         // 3. 測試設定關閉時，不觸發邊緣滑動
         handler.isRightEdgeNotificationCenterEnabled = false
         handler.handleTouch(point: rightEdgeStart, normalized: rightEdgeNorm, isDown: true, tipChanged: true)
-        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.93, y: 0.5), isDown: true, tipChanged: false)
-        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.93, y: 0.5), isDown: false, tipChanged: true)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), isDown: true, tipChanged: false)
+        handler.handleTouch(point: inwardStep2, normalized: CGPoint(x: 0.95, y: 0.5), isDown: false, tipChanged: true)
         handler.isRightEdgeNotificationCenterEnabled = true
 
         // 4. 測試通知中心呼叫
