@@ -14,17 +14,18 @@ final class LongPressRingModel: ObservableObject {
     @Published var isCompleted: Bool = false
 }
 
-/// 倒數光圈 SwiftUI 視圖（加大環形進度條，外擴於手指輪廓外清晰可見）
+/// 倒數光圈 SwiftUI 視圖（加大環形進度條，外擴於手指輪廓外；倒數完畢醒目顯示 Click Hold 狀態）
 struct LongPressRingView: View {
     @ObservedObject var model: LongPressRingModel
 
     var body: some View {
         ZStack {
             if model.isVisible {
-                // 底圈（柔和半透明背景，擴大至 84pt 確保手指不遮擋）
+                // 底圈（柔和半透明背景，84pt 確保手指不遮擋）
                 Circle()
                     .stroke(Color.white.opacity(0.35), lineWidth: 4.5)
-                    .background(Circle().fill(Color.black.opacity(0.20)))
+                    .background(Circle().fill(Color.black.opacity(0.22)))
+                    .frame(width: 84, height: 84)
 
                 // 動畫進度條（隨時間流暢填滿）
                 Circle()
@@ -34,15 +35,38 @@ struct LongPressRingView: View {
                         style: StrokeStyle(lineWidth: 5.0, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
+                    .frame(width: 84, height: 84)
 
-                // 中心微光反饋點
-                Circle()
-                    .fill(model.isCompleted ? Color.green : Color.accentColor)
-                    .frame(width: model.isCompleted ? 12 : 8, height: model.isCompleted ? 12 : 8)
+                if model.isCompleted {
+                    // 倒數完成醒目指示：顯示 Click Hold 狀態膠囊，明確告知使用者目前已進入持續按住狀態
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.green)
+                        Text("Click Hold")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.88))
+                            .overlay(Capsule().stroke(Color.green, lineWidth: 1.5))
+                    )
+                    .shadow(color: Color.black.opacity(0.5), radius: 5, x: 0, y: 2)
+                    .transition(.scale.combined(with: .opacity))
+                } else {
+                    // 倒數計時中中心微光點
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 8, height: 8)
+                }
             }
         }
-        .frame(width: 84, height: 84)
+        .frame(width: 140, height: 120)
         .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
+        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: model.isCompleted)
     }
 }
 
@@ -54,8 +78,9 @@ final class LongPressRingOverlay {
     private var panel: NSPanel?
     private let model = LongPressRingModel()
     private var animationTimer: Timer?
-    /// 光圈視窗大小（92pt，提供足夠空間完整顯示 84pt 光圈與陰影）
-    private let ringSize: CGFloat = 92.0
+    /// 浮動視窗尺寸（140x120，完整容納 84pt 光圈與 Click Hold 狀態膠囊）
+    private let panelWidth: CGFloat = 140.0
+    private let panelHeight: CGFloat = 120.0
 
     private init() {
         setupPanel()
@@ -63,7 +88,7 @@ final class LongPressRingOverlay {
 
     private func setupPanel() {
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: ringSize, height: ringSize),
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -87,10 +112,10 @@ final class LongPressRingOverlay {
 
         guard let panel = self.panel else { return }
 
-        // 轉換全域座標 (CGEvent Top-Left 轉 AppKit Bottom-Left)
+        // 轉換全域座標 (CGEvent Top-Left 轉 AppKit Bottom-Left，中心對齊)
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 1080.0
-        let originX = globalPoint.x - (ringSize / 2.0)
-        let originY = primaryHeight - globalPoint.y - (ringSize / 2.0)
+        let originX = globalPoint.x - (panelWidth / 2.0)
+        let originY = primaryHeight - globalPoint.y - (panelHeight / 2.0)
 
         panel.setFrameOrigin(NSPoint(x: originX, y: originY))
         panel.orderFrontRegardless()
@@ -114,8 +139,10 @@ final class LongPressRingOverlay {
                 t.invalidate()
                 self.animationTimer = nil
                 self.model.isCompleted = true
-                // 停留極短暫脈衝後淡出
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+
+                // 倒數完成：展示 Click Hold 提示 0.75 秒後淡出
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                     if self.model.isCompleted {
                         self.hide()
                     }

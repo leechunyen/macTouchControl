@@ -638,7 +638,7 @@ struct ContentView: View {
                             Text(loc.t(.longPressRightClickTitle))
                                 .font(.body)
                                 .fontWeight(.medium)
-                            Text(loc.t(.longPressRightClickDesc))
+                            Text(gestureHandler.isLongPressRightClickEnabled ? loc.t(.longPressRightClickDesc) : loc.t(.longPressRightClickDisabledDesc))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

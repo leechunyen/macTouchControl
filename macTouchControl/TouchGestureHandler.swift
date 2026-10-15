@@ -389,38 +389,53 @@ final class TouchGestureHandler {
 
         cancelAllTimers()
 
-        // 【階梯 1】：0.20 秒定點長按就緒，立刻於觸控位置顯示倒數光圈動畫
-        let t1 = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
-                if maxDisp < self.tapSlopThreshold {
-                    self.gestureState = .longPressArmed(point: startPoint)
-                    LongPressRingOverlay.shared.show(at: startPoint, duration: self.ringDuration)
+        if isLongPressRightClickEnabled {
+            // 【開啟時】：0.20 秒定點長按就緒，立刻於觸控位置顯示倒數光圈動畫（倒數中放開為右鍵）
+            let t1 = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
+                    if maxDisp < self.tapSlopThreshold {
+                        self.gestureState = .longPressArmed(point: startPoint)
+                        LongPressRingOverlay.shared.show(at: startPoint, duration: self.ringDuration)
+                    }
                 }
             }
-        }
-        RunLoop.main.add(t1, forMode: .common)
-        self.armTimer = t1
+            RunLoop.main.add(t1, forMode: .common)
+            self.armTimer = t1
 
-        // 【階梯 2】：倒數光圈跑完（達標 longPressDuration），定點按著不放開轉為 Click Hold 直到放開
-        let t2 = Timer.scheduledTimer(withTimeInterval: clickHoldThreshold, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            switch self.gestureState {
-            case .pending(let startPoint, _, _, _, let maxDisp, _):
-                if maxDisp < self.tapSlopThreshold {
+            // 倒數光圈跑完（達標 longPressDuration），定點按著不放開轉為 Click Hold 直到放開
+            let t2 = Timer.scheduledTimer(withTimeInterval: clickHoldThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                switch self.gestureState {
+                case .pending(let startPoint, _, _, _, let maxDisp, _):
+                    if maxDisp < self.tapSlopThreshold {
+                        self.gestureState = .clickHolding(point: startPoint)
+                        self.postMouseDown(at: startPoint)
+                    }
+                case .longPressArmed(let startPoint):
+                    // 光圈倒數結束，使用者按著不放開：進入持續 Click Hold！
                     self.gestureState = .clickHolding(point: startPoint)
                     self.postMouseDown(at: startPoint)
+                default:
+                    break
                 }
-            case .longPressArmed(let startPoint):
-                // 光圈倒數結束，使用者按著不放開：進入持續 Click Hold！
-                self.gestureState = .clickHolding(point: startPoint)
-                self.postMouseDown(at: startPoint)
-            default:
-                break
             }
+            RunLoop.main.add(t2, forMode: .common)
+            self.holdTimer = t2
+        } else {
+            // 【關閉時】：無右鍵、無倒數光圈！定點按住超過短點擊門檻（0.20 秒）直接進入持續 Click Hold 直到放開
+            let tDirect = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
+                    if maxDisp < self.tapSlopThreshold {
+                        self.gestureState = .clickHolding(point: startPoint)
+                        self.postMouseDown(at: startPoint)
+                    }
+                }
+            }
+            RunLoop.main.add(tDirect, forMode: .common)
+            self.holdTimer = tDirect
         }
-        RunLoop.main.add(t2, forMode: .common)
-        self.holdTimer = t2
     }
 
     private func handleTouchMoved(point: CGPoint, timestamp: TimeInterval) {

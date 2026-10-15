@@ -82,6 +82,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.mainDisplayBadge) == "Main")
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
         #expect(manager.t(.longPressRightClickTitle) == "Long Press Right-Click & Drag (Windows / iPad Style)")
+        #expect(manager.t(.longPressRightClickDisabledDesc).contains("Right-Click & ring disabled"))
         #expect(manager.t(.longPressDurationTitle) == "Long-Press Duration")
         #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press Right-Click & Drag")
         #expect(manager.t(.identifyDisplaysButton) == "Identify")
@@ -100,6 +101,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
         #expect(manager.t(.longPressRightClickTitle) == "長按右鍵與按住拖曳 (Windows / iPad 風格)")
+        #expect(manager.t(.longPressRightClickDisabledDesc).contains("已關閉右鍵與光圈"))
         #expect(manager.t(.longPressDurationTitle) == "長按倒數時間")
         #expect(manager.t(.menuToggleLongPressRightClick) == "長按右鍵與按住拖曳")
     }
