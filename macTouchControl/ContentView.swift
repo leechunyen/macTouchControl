@@ -694,16 +694,6 @@ struct ContentView: View {
                     .padding(12)
                     .background(gestureHandler.isRightEdgeNotificationCenterEnabled ? Color.accentColor.opacity(0.06) : Color(NSColor.controlBackgroundColor))
                     .cornerRadius(8)
-
-                    Divider()
-
-                    // 4. 底部邊緣向內滑顯示 Dock（即將推出）
-                    gesturePreviewRow(
-                        title: loc.t(.gestureDockTitle),
-                        description: loc.t(.gestureDockDesc),
-                        icon: "dock.rectangle",
-                        comingSoonBadge: loc.t(.comingSoonBadge)
-                    )
                 }
                 .padding(.top, 4)
             }
@@ -715,41 +705,5 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         )
-    }
-
-    private func gesturePreviewRow(
-        title: String,
-        description: String,
-        icon: String,
-        comingSoonBadge: String
-    ) -> some View {
-        HStack(alignment: .center) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(.secondary)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                    .fontWeight(.medium)
-                Text(description)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Text(comingSoonBadge)
-                .font(.caption2)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.purple.opacity(0.12))
-                .foregroundColor(.purple)
-                .cornerRadius(6)
-        }
-        .padding(12)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
     }
 }

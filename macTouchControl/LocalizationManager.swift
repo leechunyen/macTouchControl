@@ -106,8 +106,6 @@ enum LocKey {
     case menuToggleRightEdgeNotificationCenter
     case gestureNotificationCenterTitle
     case gestureNotificationCenterDesc
-    case gestureDockTitle
-    case gestureDockDesc
 
     // MenuBar
     case menuStatusActive
@@ -308,10 +306,6 @@ final class LocalizationManager {
             return "右緣向內滑動開通知中心"
         case .gestureNotificationCenterDesc:
             return "從外接觸控面板的右側邊緣向內滑動，立即展開 macOS 通知中心"
-        case .gestureDockTitle:
-            return "底緣向內滑動顯示 Dock"
-        case .gestureDockDesc:
-            return "從觸控螢幕底端往上輕滑，快速喚出 macOS Dock 工具列"
 
         case .menuStatusActive:
             return "● macTouchControl: 服務運作中"
@@ -457,10 +451,6 @@ final class LocalizationManager {
             return "Swipe In from Right for Notification Center"
         case .gestureNotificationCenterDesc:
             return "Swipe inward from the right edge of the touch monitor to open Notification Center."
-        case .gestureDockTitle:
-            return "Swipe Up from Bottom for Dock"
-        case .gestureDockDesc:
-            return "Swipe upward from the bottom edge to reveal the macOS Dock."
 
         case .menuStatusActive:
             return "● macTouchControl: Active"
