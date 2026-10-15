@@ -135,13 +135,26 @@ final class TouchGestureHandler {
         }
     }
 
-    /// 是否啟用 Windows 風格定點長按觸發右鍵（預設開啟）
+    /// 是否啟用定點長按持續按住（0.3 秒，滑鼠左鍵按住直到放開，預設開啟）
+    var isLongPressHoldEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(isLongPressHoldEnabled, forKey: "macTouchControl.longPressHoldEnabled")
+            UserDefaults.standard.synchronize()
+            if !isLongPressHoldEnabled {
+                holdTimer?.invalidate()
+                holdTimer = nil
+            }
+        }
+    }
+
+    /// 是否啟用定點長按觸發右鍵選單（0.8 秒時間階梯，預設開啟）
     var isLongPressRightClickEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isLongPressRightClickEnabled, forKey: "macTouchControl.longPressRightClickEnabled")
             UserDefaults.standard.synchronize()
             if !isLongPressRightClickEnabled {
-                cancelLongPressTimer()
+                rightClickTimer?.invalidate()
+                rightClickTimer = nil
             }
         }
     }
@@ -164,10 +177,12 @@ final class TouchGestureHandler {
         case stoppingMomentum(point: CGPoint)
         /// 正在進行雙向（垂直與水平）滑動捲動
         case scrolling(lastPoint: CGPoint, velocityTracker: [(TimeInterval, CGPoint)])
-        /// 定點長按已就緒（若抬手則觸發右鍵；若手指移動則無縫切換為「按著拖曳」）
-        case longPressArmed(point: CGPoint)
+        /// 0.30 秒長按持續按住已觸發（滑鼠左鍵按住，抬手釋放，移動時轉為拖曳）
+        case holding(startPoint: CGPoint, currentPoint: CGPoint)
         /// 正在進行物件或視窗拖曳（滑鼠左鍵按住拖曳）
         case dragging(lastPoint: CGPoint)
+        /// 0.80 秒定點長按觸發右鍵選單已完成
+        case rightClickTriggered
         /// 正在進行右側邊緣向內滑動手勢
         case edgeSwiping(startPoint: CGPoint, startNormalized: CGPoint, targetBounds: CGRect?)
         /// 邊緣手勢已觸發（如通知中心已開），直至手指抬起期間忽略後續事件
@@ -175,6 +190,8 @@ final class TouchGestureHandler {
     }
 
     private var gestureState: GestureState = .idle
+    private var holdTimer: Timer?
+    private var rightClickTimer: Timer?
     private var longPressTimer: Timer?
 
     // MARK: - Precision Thresholds & Click Lock Engine
@@ -196,11 +213,11 @@ final class TouchGestureHandler {
         ProcessInfo.processInfo.systemUptime - lastScrollTimestamp < scrollClickLockDuration
     }
 
-    /// 手指輕點有效位移容許範圍 (14.0pt)：人體手指指腹接觸面約 10~15mm，落指與抬起時的重心自然微移在 14pt 內均判定為有效點擊，杜絕誤當微小滑動
-    private let tapSlopThreshold: CGFloat = 14.0
+    /// 手指輕點與長按防抖有效位移容許範圍 (16.0pt)：適應手指接觸面重心自然微移，杜絕誤判定為滑動
+    private let tapSlopThreshold: CGFloat = 16.0
 
-    /// 冷啟動時的滑動門檻 (9.0pt，位移超過 9pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊)
-    private let initialSlopThreshold: CGFloat = 9.0
+    /// 冷啟動時的滑動門檻 (14.0pt，位移超過 14pt 明顯屬於滑動意圖，立即轉入捲動並鎖定點擊，且不誤傷定點長按)
+    private let initialSlopThreshold: CGFloat = 14.0
 
     /// 處於活躍捲動工作階段 (Scroll Session) 時的滑動門檻 (4.0pt，連續劃動起步極度跟手)
     private let activeSessionSlopThreshold: CGFloat = 4.0
@@ -210,8 +227,14 @@ final class TouchGestureHandler {
         isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
     }
 
-    /// 定點長按門檻：長按約 0.38 秒（如同 Windows / Surface 觸控體驗）
-    private let longPressThreshold: TimeInterval = 0.38
+    /// 定點長按持續按住門檻（0.30 秒）：極速反應，時間一到立即觸發 leftMouseDown
+    private let holdThreshold: TimeInterval = 0.30
+
+    /// 定點長按觸發右鍵門檻（0.80 秒）：時間階梯，定點持續按住達到即呼叫右鍵選單
+    private let rightClickThreshold: TimeInterval = 0.80
+
+    /// 向下相容長按門檻別名
+    private var longPressThreshold: TimeInterval { holdThreshold }
 
     /// 有效輕點最短時間 (5ms)，過濾極端硬體噪訊，不吞掉極快點擊
     private let minTapDuration: TimeInterval = 0.005
@@ -265,12 +288,14 @@ final class TouchGestureHandler {
             "macTouchControl.touchScrollEnabled": true,
             "macTouchControl.naturalScroll": true,
             "macTouchControl.scrollSensitivity": 1.0,
+            "macTouchControl.longPressHoldEnabled": true,
             "macTouchControl.longPressRightClickEnabled": true,
             "macTouchControl.rightEdgeNotificationCenterEnabled": true
         ])
 
         self.isTouchScrollEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.touchScrollEnabled")
         self.naturalScroll = UserDefaults.standard.bool(forKey: "macTouchControl.naturalScroll")
+        self.isLongPressHoldEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressHoldEnabled")
         self.isLongPressRightClickEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled")
         self.isRightEdgeNotificationCenterEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
 
@@ -352,19 +377,46 @@ final class TouchGestureHandler {
             isTitleBar: onTitleBar
         )
 
-        // 若非連續快速滑動冷卻中，排程定點長按計時器（用於觸發右鍵或就緒「按著拖曳」）
-        if !inActiveSession {
-            let timer = Timer.scheduledTimer(withTimeInterval: longPressThreshold, repeats: false) { [weak self] _ in
+        // 【時間階梯 1】：0.30 秒長按持續按住（Left Mouse Down 直到放開）
+        if isLongPressHoldEnabled {
+            let timer = Timer.scheduledTimer(withTimeInterval: holdThreshold, repeats: false) { [weak self] _ in
                 guard let self else { return }
                 if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
-                    if maxDisp < self.tapSlopThreshold && !self.isScrollSessionActive {
-                        // 定點長按時間已達標：就緒狀態。若抬手則為右鍵；若手指移動則無縫轉為「按著拖」！
-                        self.gestureState = .longPressArmed(point: startPoint)
+                    if maxDisp < self.tapSlopThreshold {
+                        // 0.30 秒定點長按達標：立即發送 leftMouseDown，進入持續按住狀態
+                        self.gestureState = .holding(startPoint: startPoint, currentPoint: startPoint)
+                        self.postMouseDown(at: startPoint)
                     }
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
-            self.longPressTimer = timer
+            self.holdTimer = timer
+        }
+
+        // 【時間階梯 2】：0.80 秒定點長按觸發右鍵選單（Right Click Context Menu）
+        if isLongPressRightClickEnabled {
+            let timer = Timer.scheduledTimer(withTimeInterval: rightClickThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                switch self.gestureState {
+                case .pending(let startPoint, _, _, _, let maxDisp, _):
+                    if maxDisp < self.tapSlopThreshold {
+                        self.gestureState = .rightClickTriggered
+                        self.synthesizeRightClick(at: startPoint)
+                    }
+                case .holding(let startPoint, let currentPoint):
+                    let disp = hypot(currentPoint.x - startPoint.x, currentPoint.y - startPoint.y)
+                    if disp < self.tapSlopThreshold {
+                        // 使用者依然在原位定點長按超 0.8s：釋放左鍵按住並彈出右鍵選單！
+                        self.gestureState = .rightClickTriggered
+                        self.postMouseUp(at: startPoint)
+                        self.synthesizeRightClick(at: startPoint)
+                    }
+                default:
+                    break
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.rightClickTimer = timer
         }
     }
 
@@ -463,24 +515,29 @@ final class TouchGestureHandler {
             // 手勢已觸發，等待抬手，不合成任何位移
             break
 
-        case .longPressArmed(let startPoint):
+        case .holding(let startPoint, _):
             let dx = point.x - startPoint.x
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
 
-            if distance >= initialSlopThreshold {
-                // 【按著拖 (Press-and-Hold Drag)】：
-                // 使用者定點長按後開始移動手指，立刻轉入左鍵按住拖曳模式！
-                // 可自由拖曳任何視窗、檔案、文字選取或滑桿！
+            if distance >= tapSlopThreshold {
+                // 移動超過防抖門檻：使用者開始拖曳！
+                // 立即取消 0.8s 右鍵計時器，轉入持續拖曳模式
+                cancelRightClickTimer()
                 gestureState = .dragging(lastPoint: point)
-                postMouseDown(at: startPoint)
                 postMouseDragged(to: point)
+            } else {
+                gestureState = .holding(startPoint: startPoint, currentPoint: point)
             }
 
         case .dragging:
             // 正在進行物件或視窗拖曳，發送連續專用左鍵拖曳事件
             gestureState = .dragging(lastPoint: point)
             postMouseDragged(to: point)
+
+        case .rightClickTriggered:
+            // 右鍵選單已跳出，忽略微移
+            break
 
         case .scrolling(let lastPoint, var velocityTracker):
             let dx = point.x - lastPoint.x
@@ -550,22 +607,24 @@ final class TouchGestureHandler {
                 synthesizeClick(at: startPoint)
             }
 
-        case .longPressArmed(let startPoint):
+        case .holding(_, let currentPoint):
+            // 0.3s ~ 0.8s 之間抬手：長按持續按住結束，發送 MouseUp！
+            cancelAllTimers()
             gestureState = .idle
-            // 【長按抬手觸發右鍵】：
-            // 使用者在定點長按達標後抬起手指（未進行拖曳）
-            if isLongPressRightClickEnabled {
-                synthesizeRightClick(at: startPoint)
-            } else {
-                // 當長按右鍵關閉時，使用者在定點按住後抬手，應視為普通點擊，不可遺失點擊！
-                synthesizeClick(at: startPoint)
-            }
+            postMouseUp(at: currentPoint)
+            WindowFrameCache.shared.refreshAsync()
 
         case .dragging:
             // 【拖曳結束釋放】：手指抬起，發送 leftMouseUp 結束視窗或物件拖曳
+            cancelAllTimers()
             gestureState = .idle
             postMouseUp(at: point)
             WindowFrameCache.shared.refreshAsync()
+
+        case .rightClickTriggered:
+            // 0.8s 右鍵已觸發過，抬手乾淨重設
+            cancelAllTimers()
+            gestureState = .idle
 
         case .scrolling(_, let velocityTracker):
             gestureState = .idle
@@ -592,9 +651,22 @@ final class TouchGestureHandler {
         }
     }
 
-    private func cancelLongPressTimer() {
+    private func cancelAllTimers() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        rightClickTimer?.invalidate()
+        rightClickTimer = nil
         longPressTimer?.invalidate()
         longPressTimer = nil
+    }
+
+    private func cancelRightClickTimer() {
+        rightClickTimer?.invalidate()
+        rightClickTimer = nil
+    }
+
+    private func cancelLongPressTimer() {
+        cancelAllTimers()
     }
 
     // MARK: - 2D Momentum Simulation (支援垂直與水平雙向慣性捲動)

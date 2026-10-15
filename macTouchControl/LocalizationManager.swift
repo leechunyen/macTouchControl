@@ -99,6 +99,9 @@ enum LocKey {
     case naturalScrollTitle
     case naturalScrollDesc
     case scrollSensitivityTitle
+    case longPressHoldTitle
+    case longPressHoldDesc
+    case menuToggleLongPressHold
     case longPressRightClickTitle
     case longPressRightClickDesc
     case menuToggleTouchScroll
@@ -292,14 +295,20 @@ final class LocalizationManager {
             return "畫面內容直接跟隨手指滑動方向位移（預設開啟）"
         case .scrollSensitivityTitle:
             return "捲動靈敏度"
+        case .longPressHoldTitle:
+            return "長按持續按住 (0.3 秒，支援拖曳)"
+        case .longPressHoldDesc:
+            return "定點按住約 0.3 秒立即觸發滑鼠左鍵持續按住，抬手即釋放；移動手指可直接進行物件拖曳或文字選取"
+        case .menuToggleLongPressHold:
+            return "長按持續按住 (0.3 秒)"
         case .longPressRightClickTitle:
-            return "長按觸發右鍵 (如同 Windows 觸控體驗)"
+            return "定點長按觸發右鍵 (0.8 秒)"
         case .longPressRightClickDesc:
-            return "手指在螢幕定點長按約 0.45 秒立即呼叫右鍵快捷選單，抬起手指不會誤觸發左鍵"
+            return "手指在同一位置持續按住約 0.8 秒呼叫右鍵選單，與 0.3 秒長按按住和平共存"
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
-            return "長按觸發右鍵選單 (Windows 風格)"
+            return "定點長按觸發右鍵 (0.8 秒)"
         case .menuToggleRightEdgeNotificationCenter:
             return "右緣向內滑開通知中心"
         case .gestureNotificationCenterTitle:
@@ -437,14 +446,20 @@ final class LocalizationManager {
             return "Content moves in the exact direction your finger slides (Enabled by default)"
         case .scrollSensitivityTitle:
             return "Scroll Sensitivity"
+        case .longPressHoldTitle:
+            return "Long Press & Hold (0.3s, Drag Support)"
+        case .longPressHoldDesc:
+            return "Hold still for ~0.3s to press and hold left mouse button until release; move finger to drag smoothly"
+        case .menuToggleLongPressHold:
+            return "Long Press & Hold (0.3s)"
         case .longPressRightClickTitle:
-            return "Long Press for Right-Click (Windows Style)"
+            return "Long Press for Right-Click (0.8s)"
         case .longPressRightClickDesc:
-            return "Touch and hold for ~0.45s to invoke context menu, release without accidental click"
+            return "Hold still for ~0.8s to open context menu; coexists peacefully with 0.3s continuous hold"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:
-            return "Long Press for Right-Click (Windows Style)"
+            return "Long Press for Right-Click (0.8s)"
         case .menuToggleRightEdgeNotificationCenter:
             return "Swipe Right Edge for Notification Center"
         case .gestureNotificationCenterTitle:

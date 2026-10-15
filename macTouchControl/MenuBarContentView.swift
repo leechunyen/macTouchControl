@@ -58,7 +58,18 @@ struct MenuBarContentView: View {
             }
         }
 
-        // 長按觸發右鍵開關（Windows 風格）
+        // 長按持續按住開關（0.3 秒）
+        Button {
+            gestureHandler.isLongPressHoldEnabled.toggle()
+        } label: {
+            if gestureHandler.isLongPressHoldEnabled {
+                Text("✓ \(loc.t(.menuToggleLongPressHold))")
+            } else {
+                Text("   \(loc.t(.menuToggleLongPressHold))")
+            }
+        }
+
+        // 定點長按觸發右鍵開關（0.8 秒）
         Button {
             gestureHandler.isLongPressRightClickEnabled.toggle()
         } label: {

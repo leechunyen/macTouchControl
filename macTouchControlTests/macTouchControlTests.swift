@@ -81,8 +81,10 @@ struct MacTouchControlTests {
         #expect(manager.t(.accessibilityTitle) == "Accessibility")
         #expect(manager.t(.mainDisplayBadge) == "Main")
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
-        #expect(manager.t(.longPressRightClickTitle) == "Long Press for Right-Click (Windows Style)")
-        #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press for Right-Click (Windows Style)")
+        #expect(manager.t(.longPressHoldTitle) == "Long Press & Hold (0.3s, Drag Support)")
+        #expect(manager.t(.menuToggleLongPressHold) == "Long Press & Hold (0.3s)")
+        #expect(manager.t(.longPressRightClickTitle) == "Long Press for Right-Click (0.8s)")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press for Right-Click (0.8s)")
         #expect(manager.t(.identifyDisplaysButton) == "Identify")
 
         // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
@@ -98,8 +100,10 @@ struct MacTouchControlTests {
         #expect(manager.t(.mainDisplayBadge) == "主螢幕")
         #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
-        #expect(manager.t(.longPressRightClickTitle) == "長按觸發右鍵 (如同 Windows 觸控體驗)")
-        #expect(manager.t(.menuToggleLongPressRightClick) == "長按觸發右鍵選單 (Windows 風格)")
+        #expect(manager.t(.longPressHoldTitle) == "長按持續按住 (0.3 秒，支援拖曳)")
+        #expect(manager.t(.menuToggleLongPressHold) == "長按持續按住 (0.3 秒)")
+        #expect(manager.t(.longPressRightClickTitle) == "定點長按觸發右鍵 (0.8 秒)")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "定點長按觸發右鍵 (0.8 秒)")
     }
 
     @Test("測試觸控設備座標標準化與邊界約束")
@@ -237,17 +241,26 @@ struct MacTouchControlTests {
         UserDefaults.standard.removeObject(forKey: "macTouchControl.touchScrollEnabled")
         UserDefaults.standard.removeObject(forKey: "macTouchControl.naturalScroll")
         UserDefaults.standard.removeObject(forKey: "macTouchControl.scrollSensitivity")
+        UserDefaults.standard.removeObject(forKey: "macTouchControl.longPressHoldEnabled")
         UserDefaults.standard.removeObject(forKey: "macTouchControl.longPressRightClickEnabled")
 
         let handler = TouchGestureHandler()
 
-        // 驗證核心預設值：平板滑動體驗、自然滑動方向、長按觸發右鍵預設必須開啟
+        // 驗證核心預設值：平板滑動體驗、自然滑動方向、0.3s長按按住、0.8s長按觸發右鍵預設必須開啟
         #expect(handler.isTouchScrollEnabled == true)
         #expect(handler.naturalScroll == true)
         #expect(handler.scrollSensitivity == 1.0)
+        #expect(handler.isLongPressHoldEnabled == true)
         #expect(handler.isLongPressRightClickEnabled == true)
 
-        // 測試使用者自訂開關長按右鍵功能
+        // 測試使用者自訂開關長按功能
+        handler.isLongPressHoldEnabled = false
+        #expect(handler.isLongPressHoldEnabled == false)
+        #expect(UserDefaults.standard.bool(forKey: "macTouchControl.longPressHoldEnabled") == false)
+
+        handler.isLongPressHoldEnabled = true
+        #expect(handler.isLongPressHoldEnabled == true)
+
         handler.isLongPressRightClickEnabled = false
         #expect(handler.isLongPressRightClickEnabled == false)
         #expect(UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled") == false)
@@ -345,6 +358,28 @@ struct MacTouchControlTests {
         let tapPt = CGPoint(x: 400, y: 400)
         handler.handleTouch(point: tapPt, normalized: norm, isDown: true, tipChanged: true)
         handler.handleTouch(point: tapPt, normalized: norm, isDown: false, tipChanged: true)
+    }
+
+    @Test("測試時間階梯手勢：0.3秒長按持續按住與0.8秒定點長按右鍵和平共存")
+    @MainActor
+    func testTieredLongPressHoldAndRightClick() {
+        let handler = TouchGestureHandler()
+        handler.isLongPressHoldEnabled = true
+        handler.isLongPressRightClickEnabled = true
+
+        let pt = CGPoint(x: 250, y: 350)
+        let norm = CGPoint(x: 0.25, y: 0.35)
+
+        // 1. 模擬快速 Tap (< 0.3s)
+        handler.handleTouch(point: pt, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: pt, normalized: norm, isDown: false, tipChanged: true)
+        #expect(!handler.hasScrolledInCurrentGesture)
+
+        // 2. 模擬長按按住後拖曳 (0.3s 後位移)
+        handler.handleTouch(point: pt, normalized: norm, isDown: true, tipChanged: true)
+        let dragPt = CGPoint(x: 270, y: 370)
+        handler.handleTouch(point: dragPt, normalized: norm, isDown: true, tipChanged: false)
+        handler.handleTouch(point: dragPt, normalized: norm, isDown: false, tipChanged: true)
     }
 
     @Test("測試右邊緣向內滑開通知中心手勢與防誤觸")
