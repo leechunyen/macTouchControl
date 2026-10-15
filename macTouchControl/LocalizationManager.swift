@@ -295,9 +295,9 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "捲動靈敏度"
         case .longPressRightClickTitle:
-            return "長按右鍵與按住拖曳 / 加速 (Windows / iPad 風格)"
+            return "長按右鍵與按住拖曳 (Windows / iPad 風格)"
         case .longPressRightClickDesc:
-            return "點一下為 Click；定點按住倒數光圈中放開為右鍵；光圈跑完不放開為 Click Hold（YouTube 2x 加速 / 長按按鈕）直到放開"
+            return "點一下為 Click；定點按住倒數光圈中放開為右鍵；光圈跑完不放開為 Click Hold 直到放開"
         case .longPressVisualRingTitle:
             return "顯示長按倒數光圈動畫"
         case .longPressVisualRingDesc:
@@ -305,7 +305,7 @@ final class LocalizationManager {
         case .menuToggleTouchScroll:
             return "觸控螢幕滑動捲動模式"
         case .menuToggleLongPressRightClick:
-            return "長按右鍵與按住拖曳 / 加速"
+            return "長按右鍵與按住拖曳"
         case .menuToggleRightEdgeNotificationCenter:
             return "右緣向內滑開通知中心"
         case .gestureNotificationCenterTitle:
@@ -444,17 +444,17 @@ final class LocalizationManager {
         case .scrollSensitivityTitle:
             return "Scroll Sensitivity"
         case .longPressRightClickTitle:
-            return "Long Press Right-Click & Drag / Speedup (Windows / iPad Style)"
+            return "Long Press Right-Click & Drag (Windows / iPad Style)"
         case .longPressRightClickDesc:
-            return "Tap for Click; release during animated ring countdown for Right-Click; hold past completion for Click-Hold (YouTube speedup) until release"
+            return "Tap for Click; release during animated ring countdown for Right-Click; hold past completion for Click Hold until release"
         case .longPressVisualRingTitle:
             return "Show Long-Press Countdown Ring"
         case .longPressVisualRingDesc:
-            return "Shows an animated circular countdown at the touch point: release during countdown for Right-Click, hold past completion for Click-Hold"
+            return "Shows an animated circular countdown at the touch point: release during countdown for Right-Click, hold past completion for Click Hold"
         case .menuToggleTouchScroll:
             return "Tablet Touch Scrolling"
         case .menuToggleLongPressRightClick:
-            return "Long Press Right-Click & Drag / Speedup"
+            return "Long Press Right-Click & Drag"
         case .menuToggleRightEdgeNotificationCenter:
             return "Swipe Right Edge for Notification Center"
         case .gestureNotificationCenterTitle:

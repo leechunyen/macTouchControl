@@ -81,9 +81,9 @@ struct MacTouchControlTests {
         #expect(manager.t(.accessibilityTitle) == "Accessibility")
         #expect(manager.t(.mainDisplayBadge) == "Main")
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
-        #expect(manager.t(.longPressRightClickTitle) == "Long Press Right-Click & Drag / Speedup (Windows / iPad Style)")
+        #expect(manager.t(.longPressRightClickTitle) == "Long Press Right-Click & Drag (Windows / iPad Style)")
         #expect(manager.t(.longPressVisualRingTitle) == "Show Long-Press Countdown Ring")
-        #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press Right-Click & Drag / Speedup")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press Right-Click & Drag")
         #expect(manager.t(.identifyDisplaysButton) == "Identify")
 
         // 強制切換為繁體中文（嚴格台灣用語：裝置、螢幕、捲動、預設）
@@ -99,9 +99,9 @@ struct MacTouchControlTests {
         #expect(manager.t(.mainDisplayBadge) == "主螢幕")
         #expect(manager.t(.gestureScrollTitle) == "觸控螢幕雙向捲動 (平板 / 手機模式)")
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
-        #expect(manager.t(.longPressRightClickTitle) == "長按右鍵與按住拖曳 / 加速 (Windows / iPad 風格)")
+        #expect(manager.t(.longPressRightClickTitle) == "長按右鍵與按住拖曳 (Windows / iPad 風格)")
         #expect(manager.t(.longPressVisualRingTitle) == "顯示長按倒數光圈動畫")
-        #expect(manager.t(.menuToggleLongPressRightClick) == "長按右鍵與按住拖曳 / 加速")
+        #expect(manager.t(.menuToggleLongPressRightClick) == "長按右鍵與按住拖曳")
     }
 
     @Test("測試觸控設備座標標準化與邊界約束")
