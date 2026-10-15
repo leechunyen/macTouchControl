@@ -82,8 +82,27 @@ final class PermissionManager {
 
     /// 在 Finder 中顯示當前 App 執行檔/應用程式本體，方便使用者拖曳進隱私設定列表
     func revealAppInFinder() {
-        let bundleURL = Bundle.main.bundleURL
-        NSWorkspace.shared.activateFileViewerSelecting([bundleURL])
+        let path = Bundle.main.bundlePath
+        let url = URL(fileURLWithPath: path)
+
+        // 1. 透過標準 NSWorkspace API 在 Finder 中選取檔案
+        let selected = NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        if !selected {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+
+        // 2. 透過系統 /usr/bin/open -R 指令作為雙重保險，確保任何環境下皆能觸發選取並開啟資料夾
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-R", path]
+        try? task.run()
+
+        // 3. 強制將 Finder 喚醒並置於最前台，確保使用者能清晰看到高亮選取的 App 檔案
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+                finder.activate(options: [.activateIgnoringOtherApps])
+            }
+        }
     }
 
     /// 開啟系統設定對應的隱私權面板

@@ -181,7 +181,9 @@ final class WindowAccessorView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let window = window {
-            callback?(window)
+            DispatchQueue.main.async { [weak self] in
+                self?.callback?(window)
+            }
         }
     }
 }
