@@ -83,6 +83,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.gestureScrollTitle) == "Touchscreen 2D Scrolling (Tablet Mode)")
         #expect(manager.t(.longPressRightClickTitle) == "Long Press Right-Click & Drag (Windows / iPad Style)")
         #expect(manager.t(.longPressVisualRingTitle) == "Show Long-Press Countdown Ring")
+        #expect(manager.t(.longPressDurationTitle) == "Long-Press Duration")
         #expect(manager.t(.menuToggleLongPressRightClick) == "Long Press Right-Click & Drag")
         #expect(manager.t(.identifyDisplaysButton) == "Identify")
 
@@ -101,6 +102,7 @@ struct MacTouchControlTests {
         #expect(manager.t(.naturalScrollTitle) == "自然捲動方向 (Natural Scrolling)")
         #expect(manager.t(.longPressRightClickTitle) == "長按右鍵與按住拖曳 (Windows / iPad 風格)")
         #expect(manager.t(.longPressVisualRingTitle) == "顯示長按倒數光圈動畫")
+        #expect(manager.t(.longPressDurationTitle) == "長按倒數時間")
         #expect(manager.t(.menuToggleLongPressRightClick) == "長按右鍵與按住拖曳")
     }
 
@@ -318,6 +320,19 @@ struct MacTouchControlTests {
         handler.scrollSensitivity = 2.5
         #expect(handler.scrollSensitivity == 2.5)
         #expect(UserDefaults.standard.double(forKey: "macTouchControl.scrollSensitivity") == 2.5)
+
+        // 測試長按倒計時時間長度調節與邊界限制
+        #expect(handler.longPressDuration == 0.65)
+        handler.longPressDuration = 0.85
+        #expect(handler.longPressDuration == 0.85)
+        #expect(UserDefaults.standard.double(forKey: "macTouchControl.longPressDuration") == 0.85)
+
+        // 測試邊界限制 [0.40, 1.50]
+        handler.longPressDuration = 0.10
+        #expect(handler.longPressDuration == 0.40)
+        handler.longPressDuration = 3.00
+        #expect(handler.longPressDuration == 1.50)
+        handler.longPressDuration = 0.65
 
         let holdPoint = CGPoint(x: 200, y: 200)
         let norm = CGPoint(x: 0.2, y: 0.2)

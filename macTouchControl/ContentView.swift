@@ -683,6 +683,36 @@ struct ContentView: View {
                         .padding(.leading, 12)
                         .padding(.trailing, 8)
                         .padding(.vertical, 4)
+
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 16))
+                                .foregroundColor(.accentColor)
+                                .frame(width: 24)
+
+                            Text(loc.t(.longPressDurationTitle))
+                                .font(.subheadline)
+
+                            Spacer()
+
+                            Slider(
+                                value: Binding<Double>(
+                                    get: { gestureHandler.longPressDuration },
+                                    set: { gestureHandler.longPressDuration = (round($0 * 20.0) / 20.0) }
+                                ),
+                                in: 0.40...1.50,
+                                step: 0.05
+                            )
+                            .frame(width: 140)
+
+                            Text(String(format: loc.currentEffectiveLanguage == .zh_tw ? "%.2f 秒" : "%.2fs", gestureHandler.longPressDuration))
+                                .font(.caption.monospacedDigit())
+                                .foregroundColor(.secondary)
+                                .frame(width: 55, alignment: .trailing)
+                        }
+                        .padding(.leading, 12)
+                        .padding(.trailing, 8)
+                        .padding(.vertical, 4)
                     }
 
                     Divider()

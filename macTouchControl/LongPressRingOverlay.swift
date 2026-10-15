@@ -14,35 +14,35 @@ final class LongPressRingModel: ObservableObject {
     @Published var isCompleted: Bool = false
 }
 
-/// 倒數光圈 SwiftUI 視圖（圓形進度條）
+/// 倒數光圈 SwiftUI 視圖（加大環形進度條，外擴於手指輪廓外清晰可見）
 struct LongPressRingView: View {
     @ObservedObject var model: LongPressRingModel
 
     var body: some View {
         ZStack {
             if model.isVisible {
-                // 底圈（柔和半透明背景）
+                // 底圈（柔和半透明背景，擴大至 84pt 確保手指不遮擋）
                 Circle()
-                    .stroke(Color.white.opacity(0.35), lineWidth: 3.5)
-                    .background(Circle().fill(Color.black.opacity(0.25)))
+                    .stroke(Color.white.opacity(0.35), lineWidth: 4.5)
+                    .background(Circle().fill(Color.black.opacity(0.20)))
 
                 // 動畫進度條（隨時間流暢填滿）
                 Circle()
                     .trim(from: 0.0, to: model.progress)
                     .stroke(
                         model.isCompleted ? Color.green : Color.accentColor,
-                        style: StrokeStyle(lineWidth: 4.0, lineCap: .round)
+                        style: StrokeStyle(lineWidth: 5.0, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
 
-                // 中心反饋亮點
+                // 中心微光反饋點
                 Circle()
                     .fill(model.isCompleted ? Color.green : Color.accentColor)
-                    .frame(width: model.isCompleted ? 10 : 6, height: model.isCompleted ? 10 : 6)
+                    .frame(width: model.isCompleted ? 12 : 8, height: model.isCompleted ? 12 : 8)
             }
         }
-        .frame(width: 52, height: 52)
-        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
+        .frame(width: 84, height: 84)
+        .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
     }
 }
 
@@ -54,7 +54,8 @@ final class LongPressRingOverlay {
     private var panel: NSPanel?
     private let model = LongPressRingModel()
     private var animationTimer: Timer?
-    private let ringSize: CGFloat = 56.0
+    /// 光圈視窗大小（92pt，提供足夠空間完整顯示 84pt 光圈與陰影）
+    private let ringSize: CGFloat = 92.0
 
     private init() {
         setupPanel()

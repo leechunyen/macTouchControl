@@ -154,6 +154,18 @@ final class TouchGestureHandler {
         }
     }
 
+    /// 長按倒數時間長度（範圍 0.40 ~ 1.50 秒，預設 0.65 秒，支援使用者個人化調整）
+    var longPressDuration: Double = 0.65 {
+        didSet {
+            let clamped = min(max(longPressDuration, 0.40), 1.50)
+            if clamped != longPressDuration {
+                longPressDuration = clamped
+            }
+            UserDefaults.standard.set(longPressDuration, forKey: "macTouchControl.longPressDuration")
+            UserDefaults.standard.synchronize()
+        }
+    }
+
     /// 是否啟用右邊緣向內側滑開通知中心（預設開啟）
     var isRightEdgeNotificationCenterEnabled: Bool = true {
         didSet {
@@ -222,13 +234,15 @@ final class TouchGestureHandler {
         isScrollSessionActive ? activeSessionSlopThreshold : initialSlopThreshold
     }
 
-    /// 輕點判定與右鍵光圈倒數開始門檻（0.22 秒）：快速輕點 < 0.22s 為 Click；超過則開始倒數光圈
-    private let shortTapThreshold: TimeInterval = 0.22
+    /// 輕點判定與右鍵光圈倒數開始門檻（0.20 秒）：快速輕點 < 0.20s 為 Click；超過則開始倒數光圈
+    private let shortTapThreshold: TimeInterval = 0.20
 
-    /// 定點持續 Click Hold 門檻（0.68 秒）：按住超過 0.68 秒光圈倒數完畢，開始 Click Hold（例如 YouTube 2x 加速）
-    private let clickHoldThreshold: TimeInterval = 0.68
+    /// 定點持續 Click Hold 門檻（依據使用者設定的 longPressDuration，光圈跑完即觸發）
+    private var clickHoldThreshold: TimeInterval {
+        max(shortTapThreshold + 0.15, longPressDuration)
+    }
 
-    /// 光圈倒數動畫時長（0.68 - 0.22 = 0.46 秒）
+    /// 光圈倒數動畫時長
     private var ringDuration: TimeInterval {
         clickHoldThreshold - shortTapThreshold
     }
@@ -290,6 +304,7 @@ final class TouchGestureHandler {
             "macTouchControl.scrollSensitivity": 1.0,
             "macTouchControl.longPressRightClickEnabled": true,
             "macTouchControl.longPressVisualRingEnabled": true,
+            "macTouchControl.longPressDuration": 0.65,
             "macTouchControl.rightEdgeNotificationCenterEnabled": true
         ])
 
@@ -297,6 +312,8 @@ final class TouchGestureHandler {
         self.naturalScroll = UserDefaults.standard.bool(forKey: "macTouchControl.naturalScroll")
         self.isLongPressRightClickEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressRightClickEnabled")
         self.isLongPressVisualRingEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.longPressVisualRingEnabled")
+        let savedDuration = UserDefaults.standard.double(forKey: "macTouchControl.longPressDuration")
+        self.longPressDuration = savedDuration > 0 ? savedDuration : 0.65
         self.isRightEdgeNotificationCenterEnabled = UserDefaults.standard.bool(forKey: "macTouchControl.rightEdgeNotificationCenterEnabled")
 
         let savedSensitivity = UserDefaults.standard.double(forKey: "macTouchControl.scrollSensitivity")
@@ -379,7 +396,7 @@ final class TouchGestureHandler {
 
         cancelAllTimers()
 
-        // 【階梯 1】：0.22 秒定點長按就緒，立刻於觸控位置顯示倒數光圈動畫
+        // 【階梯 1】：0.20 秒定點長按就緒，立刻於觸控位置顯示倒數光圈動畫
         let t1 = Timer.scheduledTimer(withTimeInterval: shortTapThreshold, repeats: false) { [weak self] _ in
             guard let self else { return }
             if case .pending(let startPoint, _, _, _, let maxDisp, _) = self.gestureState {
@@ -394,7 +411,7 @@ final class TouchGestureHandler {
         RunLoop.main.add(t1, forMode: .common)
         self.armTimer = t1
 
-        // 【階梯 2】：0.68 秒倒數光圈跑完，定點按著不放開轉為 Click Hold 直到放開（例如 YouTube 2x 加速）
+        // 【階梯 2】：倒數光圈跑完（達標 longPressDuration），定點按著不放開轉為 Click Hold 直到放開
         let t2 = Timer.scheduledTimer(withTimeInterval: clickHoldThreshold, repeats: false) { [weak self] _ in
             guard let self else { return }
             switch self.gestureState {
