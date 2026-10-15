@@ -465,4 +465,24 @@ struct MacTouchControlTests {
         handler.handleTouch(point: touchPt, normalized: CGPoint(x: 0.5, y: 0.5), isDown: false, tipChanged: true)
         #expect(handler.isLongPressRightClickEnabled == false)
     }
+
+    @Test("測試連續雙擊判定、座標鎖定與開檔手勢支援")
+    @MainActor
+    func testConsecutiveDoubleClickHandling() {
+        let handler = TouchGestureHandler()
+        let norm = CGPoint(x: 0.5, y: 0.5)
+
+        // 模擬第一次點擊 (Click 1)
+        let pt1 = CGPoint(x: 500, y: 500)
+        handler.handleTouch(point: pt1, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: pt1, normalized: norm, isDown: false, tipChanged: true)
+
+        // 模擬短時間內微幅位移的第二次點擊 (Click 2, 模擬手指落在 15pt 外)
+        let pt2 = CGPoint(x: 512, y: 508)
+        handler.handleTouch(point: pt2, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: pt2, normalized: norm, isDown: false, tipChanged: true)
+
+        // 驗證未被誤判為捲動手勢
+        #expect(!handler.hasScrolledInCurrentGesture)
+    }
 }

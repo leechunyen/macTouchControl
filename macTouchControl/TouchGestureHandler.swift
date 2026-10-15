@@ -236,6 +236,14 @@ final class TouchGestureHandler {
     private var lastClickPoint: CGPoint = .zero
     private var currentClickCount: Int64 = 1
 
+    /// 系統雙擊最大允許時間間隔（動態取自 macOS 系統偏好設定，並保證觸控螢幕有充裕的判定時間）
+    private var doubleClickTimeWindow: TimeInterval {
+        max(NSEvent.doubleClickInterval, 0.65)
+    }
+
+    /// 觸控雙擊容許的兩次落指微幅距離誤差（45pt，約 1/3 英吋，滿足人體手指在玻璃上的連續輕擊自然漂移）
+    private let doubleClickMaxDistance: CGFloat = 45.0
+
     // 專屬事件來源，內建白名單簽名
     private let eventSource: CGEventSource? = {
         let source = CGEventSource(stateID: .combinedSessionState)
@@ -302,11 +310,18 @@ final class TouchGestureHandler {
     ) {
         cancelLongPressTimer()
 
-        // 核心同步 1：背景異步啟動落指位置下方的應用程式，消除跨螢幕焦點滯留與 macOS 背景 App Nap 節流
-        activateAppUnder(point: point)
+        // 判定是否正處於連續雙擊判定視窗內（使用者正在快速連點第二下）
+        let isPotentialConsecutiveTap = (timestamp - lastClickTime < doubleClickTimeWindow) &&
+                                        (hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) < doubleClickMaxDistance)
 
-        // 核心同步 2：落指時立即更新 WindowServer 命中焦點與游標位置
-        updateWindowServerPointer(at: point)
+        if !isPotentialConsecutiveTap {
+            // 非雙擊時，背景啟動落指位置下方的應用程式以確保焦點
+            activateAppUnder(point: point)
+            updateWindowServerPointer(at: point)
+        } else {
+            // 連擊狀態下直接將游標無延遲釘死在原始點擊點，杜絕像素偏移導致 Finder 誤判
+            CGWarpMouseCursorPosition(lastClickPoint)
+        }
         lastScrollPoint = point
 
         // 檢查是否處於慣性滑行中
@@ -377,7 +392,12 @@ final class TouchGestureHandler {
             let dy = point.y - startPoint.y
             let distance = hypot(dx, dy)
             let updatedMaxDisp = max(maxDisp, distance)
-            let threshold = currentSlopThreshold
+
+            // 連擊防抖保護：若處於連續雙擊判定視窗內（使用者正在快速連點第二下），放寬門檻（22.0pt）
+            // 杜絕手指快速連擊時因著力面積微移被誤判為微小拖曳或捲動！
+            let isPotentialConsecutiveTap = (timestamp - lastClickTime < doubleClickTimeWindow) &&
+                                            (hypot(startPoint.x - lastClickPoint.x, startPoint.y - lastClickPoint.y) < doubleClickMaxDistance)
+            let threshold = isPotentialConsecutiveTap ? 22.0 : currentSlopThreshold
 
             if distance >= threshold {
                 cancelLongPressTimer()
@@ -517,24 +537,28 @@ final class TouchGestureHandler {
             let elapsed = timestamp - startTime
             let liftDist = hypot(point.x - startPoint.x, point.y - startPoint.y)
 
-            // 【自然穩健且精確的點擊判定】：
-            // 1. 若手勢曾進入捲動狀態（hasScrolledInCurrentGesture == true），絕對鎖死點擊
-            // 2. 接觸時間在 0.02s 至 longPressThreshold (0.38s) 之間，徹底消除 220ms~380ms 的盲區死角
-            // 3. 最大位移與抬手位移均在指腹容許範圍內 (< tapSlopThreshold (8.0pt))
+            // 連擊防抖保護：若處於連續雙擊判定視窗內，適度放寬指腹容許範圍
+            let isPotentialConsecutiveTap = (timestamp - lastClickTime < doubleClickTimeWindow) &&
+                                            (hypot(startPoint.x - lastClickPoint.x, startPoint.y - lastClickPoint.y) < doubleClickMaxDistance)
+            let allowedSlop = isPotentialConsecutiveTap ? 25.0 : tapSlopThreshold
+
             if !hasScrolledInCurrentGesture &&
                elapsed >= minTapDuration &&
                elapsed < longPressThreshold &&
-               liftDist < tapSlopThreshold &&
-               maxDisp < tapSlopThreshold {
+               liftDist < allowedSlop &&
+               maxDisp < allowedSlop {
                 synthesizeClick(at: startPoint)
             }
 
         case .longPressArmed(let startPoint):
             gestureState = .idle
             // 【長按抬手觸發右鍵】：
-            // 使用者在定點長按達標後抬起手指（未進行拖曳），觸發 Windows 風格右鍵選單！
+            // 使用者在定點長按達標後抬起手指（未進行拖曳）
             if isLongPressRightClickEnabled {
                 synthesizeRightClick(at: startPoint)
+            } else {
+                // 當長按右鍵關閉時，使用者在定點按住後抬手，應視為普通點擊，不可遺失點擊！
+                synthesizeClick(at: startPoint)
             }
 
         case .dragging:
@@ -658,19 +682,10 @@ final class TouchGestureHandler {
         }
     }
 
-    /// 確保 WindowServer 立即更新指針全域命中測試（Hit-Testing）視窗，杜絕跨視窗與跨螢幕操作後的焦點滯留
+    /// 確保 WindowServer 立即更新游標位置，杜絕跨視窗與跨螢幕操作後的焦點滯留
     private func updateWindowServerPointer(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
         CGWarpMouseCursorPosition(point)
-        guard let moveEvent = CGEvent(
-            mouseEventSource: eventSource,
-            mouseType: .mouseMoved,
-            mouseCursorPosition: point,
-            mouseButton: .left
-        ) else { return }
-        moveEvent.location = point
-        moveEvent.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        moveEvent.post(tap: .cgSessionEventTap)
     }
 
     /// 發送雙向捲動事件：wheel1 為垂直 (Y)，wheel2 為水平 (X)，精確指定 location 視窗目標
@@ -747,40 +762,48 @@ final class TouchGestureHandler {
         event.post(tap: .cghidEventTap)
     }
 
-    /// 合成標準左鍵輕點（原生連擊判定、白名單簽名、派發至登入 Session 杜絕被底層攔截）
+    /// 合成標準左鍵輕點（原生連擊判定、座標精準鎖定、白名單簽名、HID 硬體級可靠派發）
     private func synthesizeClick(at point: CGPoint) {
         guard PermissionManager.shared.isAccessibilityGranted else { return }
 
-        updateWindowServerPointer(at: point)
+        let now = ProcessInfo.processInfo.systemUptime
+        let clickInterval = now - lastClickTime
+        let clickDist = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y)
+
+        // 判定是否為連續點擊（雙擊或三擊）
+        let isConsecutive = (clickInterval < doubleClickTimeWindow) && (clickDist < doubleClickMaxDistance)
+
+        let clickPoint: CGPoint
+        if isConsecutive {
+            currentClickCount = min(currentClickCount + 1, 3)
+            // 【核心修正】：連續點擊時，將座標 100% 釘死在第一次點擊的原始座標！
+            // 解決 Finder 判定 4px 偏移導致視為單擊選取/重新命名檔案的問題，確保 Finder 百分之百觸發雙擊開啟檔案！
+            clickPoint = lastClickPoint
+        } else {
+            currentClickCount = 1
+            clickPoint = point
+            lastClickPoint = point
+        }
+        lastClickTime = now
+
+        // 游標即刻對齊目標座標（絕不發送 mouseMoved 避免重置 AppKit clickCount）
+        CGWarpMouseCursorPosition(clickPoint)
 
         guard let down = CGEvent(
             mouseEventSource: eventSource,
             mouseType: .leftMouseDown,
-            mouseCursorPosition: point,
+            mouseCursorPosition: clickPoint,
             mouseButton: .left
         ),
         let up = CGEvent(
             mouseEventSource: eventSource,
             mouseType: .leftMouseUp,
-            mouseCursorPosition: point,
+            mouseCursorPosition: clickPoint,
             mouseButton: .left
         ) else { return }
 
-        down.location = point
-        up.location = point
-
-        // 連續點擊計算（支援雙擊打開檔案、三擊選取文字）
-        let now = ProcessInfo.processInfo.systemUptime
-        let clickInterval = now - lastClickTime
-        let clickDist = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y)
-
-        if clickInterval < 0.45 && clickDist < 30.0 {
-            currentClickCount = min(currentClickCount + 1, 3)
-        } else {
-            currentClickCount = 1
-        }
-        lastClickTime = now
-        lastClickPoint = point
+        down.location = clickPoint
+        up.location = clickPoint
 
         down.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
         up.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
@@ -789,14 +812,10 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
-        // 派發至 .cgSessionEventTap，直達 WindowServer 視窗層，絕不被底層 HID EventTap 阻擋
-        down.post(tap: .cgSessionEventTap)
-
-        // 給予微小且真實的點擊維持時間（約 15ms），保證瀏覽器、按鈕動畫與選單可靠捕捉 Click
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) { [weak self] in
-            guard let _ = self else { return }
-            up.post(tap: .cgSessionEventTap)
-        }
+        // 派發至 .cghidEventTap（硬體級事件隊列，Finder、Dock 與沙盒應用完全信賴並支援 Double Click 啟動）
+        down.post(tap: .cghidEventTap)
+        usleep(12_000) // 12ms 原子性脈衝，確保按鍵狀態可靠傳遞且不與下次點擊競爭
+        up.post(tap: .cghidEventTap)
     }
 
     /// 合成 Windows 風格長按右鍵選單（原子性同步發送，帶有防誤觸白名單簽名）
@@ -828,8 +847,8 @@ final class TouchGestureHandler {
         down.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
         up.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
 
-        down.post(tap: .cgSessionEventTap)
-        up.post(tap: .cgSessionEventTap)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
     }
 
     // MARK: - Dedicated Mouse Drag Actions (專用拖曳合成，無任何中斷干擾)
@@ -847,7 +866,7 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cgSessionEventTap)
+        event.post(tap: .cghidEventTap)
     }
 
     /// 發送連續的滑鼠左鍵拖曳（絕不插入 mouseMoved 或 cursor warp，確保 WindowServer 拖曳不中斷）
@@ -862,7 +881,7 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cgSessionEventTap)
+        event.post(tap: .cghidEventTap)
     }
 
     /// 發送滑鼠左鍵釋放（結束視窗或物件拖曳）
@@ -877,6 +896,6 @@ final class TouchGestureHandler {
         event.location = point
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.setIntegerValueField(.eventSourceUserData, value: Self.synthesizedEventSignature)
-        event.post(tap: .cgSessionEventTap)
+        event.post(tap: .cghidEventTap)
     }
 }
