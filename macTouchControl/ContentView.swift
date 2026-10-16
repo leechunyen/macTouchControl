@@ -59,7 +59,7 @@ struct ContentView: View {
     }
 
     private var headerView: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             if let appIcon = appIconImage {
                 Image(nsImage: appIcon)
                     .resizable()
@@ -94,22 +94,48 @@ struct ContentView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .help(loc.t(.autoStartDesc))
-            .padding(.trailing, 10)
+            .padding(.trailing, 8)
 
-            // 語言切換選擇器
-            Picker("", selection: Binding<AppLanguage>(
-                get: { loc.selectedLanguage },
-                set: { loc.selectedLanguage = $0 }
-            )) {
-                ForEach(AppLanguage.allCases) { lang in
-                    Text(lang.displayName).tag(lang)
+            // 右側垂直堆疊：語言選擇器 + 捐款按鈕（放置於語言正下方）
+            VStack(alignment: .trailing, spacing: 6) {
+                // 語言切換選擇器
+                Picker("", selection: Binding<AppLanguage>(
+                    get: { loc.selectedLanguage },
+                    set: { loc.selectedLanguage = $0 }
+                )) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Text(lang.displayName).tag(lang)
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 150)
+
+                // 贊助作者喝杯咖啡 (Buy Me a Coffee) 按鈕
+                Button {
+                    if let url = URL(string: "https://buymeacoffee.com/cylee99") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("☕️")
+                            .font(.system(size: 11))
+                        Text(loc.t(.buyMeACoffee))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.orange)
+                .controlSize(.small)
+                .help(loc.t(.supportDeveloperDesc))
+                .frame(width: 150)
             }
-            .labelsHidden()
-            .frame(width: 140)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
         .background(Color(NSColor.controlBackgroundColor))
     }
 

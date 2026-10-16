@@ -127,6 +127,10 @@ enum LocKey {
     case autoStartTitle
     case autoStartDesc
     case menuToggleAutoStart
+
+    // Donation / Support
+    case buyMeACoffee
+    case supportDeveloperDesc
 }
 
 @Observable
@@ -339,6 +343,11 @@ final class LocalizationManager {
             return "登入時自動在選單列常駐運行，不自動彈出控制面板"
         case .menuToggleAutoStart:
             return "開機時自動啟動 (Auto Start)"
+
+        case .buyMeACoffee:
+            return "請作者喝杯咖啡 ☕️"
+        case .supportDeveloperDesc:
+            return "如果 macTouchControl 對您有所幫助，歡迎贊助支持持續維護！"
         }
     }
 
@@ -484,6 +493,11 @@ final class LocalizationManager {
             return "Automatically start in menu bar upon login without opening the control panel"
         case .menuToggleAutoStart:
             return "Launch at Login (Auto Start)"
+
+        case .buyMeACoffee:
+            return "Buy Me a Coffee ☕️"
+        case .supportDeveloperDesc:
+            return "If you find macTouchControl helpful, consider supporting its continued development!"
         }
     }
 }

@@ -16,7 +16,7 @@ struct MenuBarContentView: View {
     @Environment(AutoStartManager.self) private var autoStartManager
 
     var body: some View {
-        // 運作狀態
+        // 狀態摘要
         if permissionManager.isAllGranted {
             Text(loc.t(.menuStatusActive))
         } else {
@@ -25,29 +25,20 @@ struct MenuBarContentView: View {
 
         Divider()
 
-        // 觸控設備與綁定螢幕清單
+        // 裝置清單與綁定
         let deviceList = Array(touchManager.devices.values)
         if deviceList.isEmpty {
             Text(loc.t(.menuNoDevices))
         } else {
             ForEach(deviceList) { device in
-                let targetDisplay = mappingStore.targetDisplay(for: device.id, availableDisplays: displayManager.displays)
-                let displayName: String = {
-                    if let targetDisplay {
-                        return targetDisplay.name
-                    } else if let saved = mappingStore.mappings[device.id] {
-                        return "\(saved.targetDisplayName) (\(loc.t(.disconnectedDisplay)))"
-                    } else {
-                        return loc.t(.unassignedDisplay)
-                    }
-                }()
-                Text("📱 \(device.name) ➔ 🖥️ \(displayName)")
+                let target = mappingStore.targetDisplay(for: device.id, availableDisplays: displayManager.displays)
+                Text("• \(device.name) → \(target?.name ?? loc.t(.unassignedDisplay))")
             }
         }
 
         Divider()
 
-        // 平板風格觸控滑動開關
+        // 觸控捲動開關
         Button {
             gestureHandler.isTouchScrollEnabled.toggle()
         } label: {
@@ -58,7 +49,7 @@ struct MenuBarContentView: View {
             }
         }
 
-        // 長按觸發右鍵與拖曳開關（Windows / iPad 風格）
+        // 長按右鍵開關
         Button {
             gestureHandler.isLongPressRightClickEnabled.toggle()
         } label: {
@@ -106,6 +97,15 @@ struct MenuBarContentView: View {
 
         Button(loc.t(.menuRevealFinder)) {
             permissionManager.revealAppInFinder()
+        }
+
+        Divider()
+
+        // 贊助作者 (Buy Me a Coffee)
+        Button("☕️ \(loc.t(.buyMeACoffee))") {
+            if let url = URL(string: "https://buymeacoffee.com/cylee99") {
+                NSWorkspace.shared.open(url)
+            }
         }
 
         Divider()
