@@ -2,6 +2,8 @@
 //  MappingStore.swift
 //  macTouchControl
 //
+//  Created by LeeChunYen on 14/10/2026.
+//
 
 import SwiftUI
 import CoreGraphics
@@ -66,11 +68,26 @@ final class MappingStore {
 
     /// 純查詢方法（純函數無副作用），保證在 SwiftUI 視圖渲染期間調用不會修改狀態或觸發重繪
     func targetDisplay(for deviceID: String, availableDisplays: [DisplayInfo]) -> DisplayInfo? {
-        guard let mapping = mappings[deviceID] else {
+        // 1. 精確依據 deviceID 查找對應綁定紀錄
+        var activeMapping = mappings[deviceID]
+
+        // 2. 若未直接命中（例如 USB 換孔插拔導致 locationID 改變）：
+        // 回退尋找相同 VendorID + ProductID 前綴、或同名裝置的綁定設定
+        if activeMapping == nil {
+            let parts = deviceID.split(separator: "_")
+            if parts.count >= 2 {
+                let vidPidPrefix = "\(parts[0])_\(parts[1])_"
+                if let matchedEntry = mappings.first(where: { $0.key.hasPrefix(vidPidPrefix) }) {
+                    activeMapping = matchedEntry.value
+                }
+            }
+        }
+
+        guard let mapping = activeMapping else {
             return nil
         }
 
-        // 1. 優先以 DisplayID 精準匹配現有螢幕
+        // 1. 優先以 DisplayID 精確匹配現有螢幕
         if let exactMatch = availableDisplays.first(where: { $0.id == mapping.targetDisplayID }) {
             return exactMatch
         }

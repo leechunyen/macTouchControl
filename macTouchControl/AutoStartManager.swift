@@ -59,11 +59,27 @@ final class AutoStartManager {
 
     /// 檢查本次啟動是否是由 macOS 登入項目（Auto Start）觸發
     func evaluateLaunchTrigger() {
+        // 1. 檢查舊版 Cocoa/Carbon 登入項目事件特徵 ("lgit")
         if let event = NSAppleEventManager.shared().currentAppleEvent {
             let keyAELaunchedAsLogInItem = AEKeyword(0x6c676974) // "lgit"
             let isLoginItem = (event.eventID == kAEOpenApplication &&
                                event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem)
-            self.launchedAsLoginItem = isLoginItem
+            if isLoginItem {
+                self.launchedAsLoginItem = true
+                return
+            }
+        }
+
+        // 2. 針對 macOS 13+ SMAppService（由 launchd 代管，登入啟動時 currentAppleEvent 大多為 nil）：
+        // 若系統已啟用自動啟動，且系統啟動時間 (uptime) 與本行程存活時間極為接近，判定為開機登入項啟動
+        if #available(macOS 13.0, *) {
+            if SMAppService.mainApp.status == .enabled {
+                let systemUptime = ProcessInfo.processInfo.systemUptime
+                if systemUptime < 120.0 {
+                    self.launchedAsLoginItem = true
+                    return
+                }
+            }
         }
     }
 }
@@ -108,6 +124,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: NSWindow.didBecomeKeyNotification,
             object: nil
         )
+    }
+
+    /// 使用者雙擊 App、或從 Spotlight / Launchpad 再次打開時，喚醒並顯示控制面板
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openControlPanel()
+        return true
     }
 
     /// 設定 App 圖標至 NSApp.applicationIconImage，即刻更新 Dock 圖示（不需等待系統 Dock 重載快取）
@@ -174,23 +196,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 // MARK: - Window Accessor for SwiftUI
 
-/// 自訂 NSView 透過 viewDidMoveToWindow 生命週期安全捕獲原生 NSWindow
+/// 自訂 NSView 透過 viewDidMoveToWindow 生命週期安全捕捉原生 NSWindow
 final class WindowAccessorView: NSView {
     var callback: ((NSWindow) -> Void)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let window = window {
-            DispatchQueue.main.async { [weak self] in
-                self?.callback?(window)
-            }
+        if let window = self.window {
+            callback?(window)
         }
     }
 }
 
-/// 輔助 SwiftUI 視窗捕獲原生 NSWindow 實例以綁定 Delegate（無佈局遞迴開銷）
+/// 將 WindowAccessorView 封裝為 SwiftUI NSViewRepresentable
 struct WindowAccessor: NSViewRepresentable {
-    let callback: (NSWindow) -> Void
+    var callback: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> WindowAccessorView {
         let view = WindowAccessorView()

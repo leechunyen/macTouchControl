@@ -2,6 +2,8 @@
 //  TouchDevice.swift
 //  macTouchControl
 //
+//  Created by LeeChunYen on 14/10/2026.
+//
 
 import Foundation
 import CoreGraphics
@@ -68,15 +70,24 @@ struct TouchDevice: Identifiable, Hashable {
         return "\(manufacturer) - \(name)"
     }
 
-    /// 將原始 HID 座標轉換為標準化 (0...1, 0...1) 比例
-    func normalizedCoordinate(rawX: Double, rawY: Double) -> CGPoint {
+    /// 將原始 HID 座標轉換為標準化 (0...1, 0...1) 比例，支援螢幕旋轉（0°, 90°, 180°, 270°）與方向翻轉
+    func normalizedCoordinate(rawX: Double, rawY: Double, rotation: Int = 0) -> CGPoint {
         let spanX = max(maxX - minX, 1.0)
         let spanY = max(maxY - minY, 1.0)
 
         let normX = max(0.0, min(1.0, (rawX - minX) / spanX))
         let normY = max(0.0, min(1.0, (rawY - minY) / spanY))
 
-        return CGPoint(x: normX, y: normY)
+        switch rotation {
+        case 90:
+            return CGPoint(x: normY, y: 1.0 - normX)
+        case 180:
+            return CGPoint(x: 1.0 - normX, y: 1.0 - normY)
+        case 270:
+            return CGPoint(x: 1.0 - normY, y: normX)
+        default:
+            return CGPoint(x: normX, y: normY)
+        }
     }
 
     static func == (lhs: TouchDevice, rhs: TouchDevice) -> Bool {

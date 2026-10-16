@@ -137,6 +137,19 @@ struct MacTouchControlTests {
         let clampedHigh = device.normalizedCoordinate(rawX: 2000, rawY: 4000)
         #expect(clampedHigh.x == 1.0)
         #expect(clampedHigh.y == 1.0)
+
+        // 測試旋轉轉換 (90°, 180°, 270°)
+        let p90 = device.normalizedCoordinate(rawX: 1000, rawY: 0, rotation: 90)
+        #expect(p90.x == 0.0)
+        #expect(p90.y == 0.0)
+
+        let p180 = device.normalizedCoordinate(rawX: 0, rawY: 0, rotation: 180)
+        #expect(p180.x == 1.0)
+        #expect(p180.y == 1.0)
+
+        let p270 = device.normalizedCoordinate(rawX: 0, rawY: 2000, rotation: 270)
+        #expect(p270.x == 0.0)
+        #expect(p270.y == 0.0)
     }
 
     @Test("測試螢幕綁定與動態匹配儲存")
@@ -182,6 +195,11 @@ struct MacTouchControlTests {
         // 驗證透過 reconcileMappings 進行狀態與磁碟持久化調和，保持 targetDisplay 為純讀取函數
         store.reconcileMappings(with: [reconnectedDisplay])
         #expect(store.mappings["dev_touch_1"]?.targetDisplayID == 202)
+
+        // 測試 USB 換孔插拔導致 locationID 改變時，回退匹配同 VendorID_ProductID 綁定
+        store.bind(deviceID: "1234_5678_LocationA", deviceName: "Portable Touch", display: display)
+        let repluggedMatch = store.targetDisplay(for: "1234_5678_LocationB", availableDisplays: [display])
+        #expect(repluggedMatch?.id == 101)
 
         // 測試解除綁定
         store.unbind(deviceID: "dev_touch_1")
@@ -530,5 +548,37 @@ struct MacTouchControlTests {
 
         // 驗證未被誤判為捲動手勢
         #expect(!handler.hasScrolledInCurrentGesture)
+    }
+
+    @Test("測試滑動中手指突然放開後重新落指滑動立即反應不鎖死")
+    @MainActor
+    func testResumeScrollFromMomentumBrake() {
+        let handler = TouchGestureHandler()
+        handler.isTouchScrollEnabled = true
+        let norm = CGPoint(x: 0.5, y: 0.5)
+
+        // 1. 模擬快速滑動並甩手觸發慣性滑行
+        let p1 = CGPoint(x: 200, y: 200)
+        let p2 = CGPoint(x: 200, y: 260)
+        let p3 = CGPoint(x: 200, y: 350)
+        let t0 = ProcessInfo.processInfo.systemUptime
+        handler.handleTouch(point: p1, normalized: norm, isDown: true, tipChanged: true)
+        handler.handleTouch(point: p2, normalized: norm, isDown: true, tipChanged: false)
+        handler.handleTouch(point: p3, normalized: norm, isDown: true, tipChanged: false)
+        handler.handleTouch(point: p3, normalized: norm, isDown: false, tipChanged: true)
+        #expect(handler.isScrollSessionActive == true)
+
+        // 2. 使用者手指立刻回來落指（觸發煞車）
+        let brakeDown = CGPoint(x: 200, y: 350)
+        handler.handleTouch(point: brakeDown, normalized: norm, isDown: true, tipChanged: true)
+
+        // 3. 手指在螢幕上繼續滑動超過門檻，驗證系統立即切入滑動模式，未被鎖死
+        let resumeMove = CGPoint(x: 200, y: 400)
+        handler.handleTouch(point: resumeMove, normalized: norm, isDown: true, tipChanged: false)
+        #expect(handler.hasScrolledInCurrentGesture == true)
+        #expect(handler.isScrollSessionActive == true)
+
+        // 4. 手指抬起結束
+        handler.handleTouch(point: resumeMove, normalized: norm, isDown: false, tipChanged: true)
     }
 }

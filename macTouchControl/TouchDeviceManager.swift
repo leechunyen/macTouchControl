@@ -2,12 +2,18 @@
 //  TouchDeviceManager.swift
 //  macTouchControl
 //
+//  Created by LeeChunYen on 14/10/2026.
+//
 
 import Foundation
 import IOKit
 import IOKit.hid
 import CoreGraphics
 import AppKit
+
+// HID Constants for Multi-Touch Contact Identifier
+private let kHIDPage_Digitizer_Local: UInt32 = 0x0D
+private let kHIDUsage_Dig_ContactIdentifier_Local: UInt32 = 0x51
 
 @Observable
 @MainActor
@@ -40,6 +46,11 @@ final class TouchDeviceManager {
 
         // 1. 手指正在按壓螢幕（包含定點長按時靜止無封包狀態）
         if (isTouching || isDown) && isRecentPacket {
+            if let lastPt = lastTouchPoint {
+                let dist = hypot(location.x - lastPt.x, location.y - lastPt.y)
+                // 僅在最後落指點 120pt 防護半徑內判定為觸控事件，遠離落點的實體滑鼠事件放行
+                return dist <= 120.0
+            }
             return true
         }
 
@@ -55,6 +66,30 @@ final class TouchDeviceManager {
             }
         }
 
+        return false
+    }
+
+    /// 判定座標是否落在任何已綁定或使用中的觸控螢幕範圍內（支援多外接觸控螢幕）
+    func isPointInAnyTouchDisplay(_ point: CGPoint) -> Bool {
+        let displayManager = DisplayManager.shared
+        if displayManager.isMirroringActive {
+            return displayManager.mainDisplay?.bounds.contains(point) ?? false
+        }
+
+        // 若無任何觸控螢幕登記，則回退至主螢幕或 false
+        if devices.isEmpty {
+            return activeTouchDisplayBounds?.contains(point) ?? false
+        }
+
+        let mappingStore = MappingStore.shared
+        for id in devices.keys {
+            let target = mappingStore.targetDisplay(for: id, availableDisplays: displayManager.displays)
+                ?? displayManager.displays.first(where: { !$0.isBuiltin })
+                ?? displayManager.mainDisplay
+            if let bounds = target?.bounds, bounds.contains(point) {
+                return true
+            }
+        }
         return false
     }
 
@@ -87,7 +122,7 @@ final class TouchDeviceManager {
     private var eventTapPort: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫，並支援 X/Y 封包原子性合併
+    // 儲存每個裝置的內部狀態以維持拖曳與點擊連貫，並支援 X/Y 封包原子性合併與多指隔離
     private var deviceStates: [String: DeviceInputState] = [:]
 
     private struct DeviceInputState {
@@ -96,6 +131,8 @@ final class TouchDeviceManager {
         var isDown: Bool = false
         var pendingXUpdate: Bool = false
         var hasTipSwitch: Bool = false
+        var currentContactID: Int = 0
+        var activePrimaryContactID: Int? = nil
     }
 
     init() {
@@ -167,12 +204,12 @@ final class TouchDeviceManager {
         start()
     }
 
-    // MARK: - CGEventTap 幽靈事件防護盾 (阻斷 macOS 內核產生的誤反白、拖曳與幽靈右鍵)
+    // MARK: - Event Tap Setup
 
-    func setupEventTap() {
+    private func setupEventTap() {
         guard eventTapPort == nil else { return }
-        guard PermissionManager.shared.isAccessibilityGranted else { return }
 
+        // 監聽並精確過濾滑鼠與觸控事件
         let mask: CGEventMask = (CGEventMask(1) << CGEventType.leftMouseDown.rawValue) |
                                 (CGEventMask(1) << CGEventType.leftMouseDragged.rawValue) |
                                 (CGEventMask(1) << CGEventType.leftMouseUp.rawValue) |
@@ -183,7 +220,7 @@ final class TouchDeviceManager {
                                 (CGEventMask(1) << CGEventType.otherMouseDragged.rawValue) |
                                 (CGEventMask(1) << CGEventType.otherMouseUp.rawValue)
 
-        let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let observer = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -208,9 +245,9 @@ final class TouchDeviceManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // 2. 螢幕空間隔離：若事件座標不在外接觸控螢幕內（例如在 MacBook 內建螢幕），100% 放行，絕不干擾主螢幕滑鼠！
+                // 2. 螢幕空間隔離：若事件座標不在任何外接觸控螢幕內（例如在 MacBook 內建螢幕），100% 放行，絕不干擾主螢幕滑鼠！
                 let location = event.location
-                guard let touchBounds = manager.activeTouchDisplayBounds, touchBounds.contains(location) else {
+                guard manager.isPointInAnyTouchDisplay(location) else {
                     return Unmanaged.passUnretained(event)
                 }
 
@@ -412,7 +449,7 @@ final class TouchDeviceManager {
         }
     }
 
-    // MARK: - Input Value Handling (封包合併與零延遲跟手架構)
+    // MARK: - Input Value Handling (封包合併與零延遲跟手架構 + 多點 Contact ID 追蹤)
 
     private func handleInputValue(_ value: IOHIDValue) {
         lastHardwarePacketTime = ProcessInfo.processInfo.systemUptime
@@ -429,33 +466,75 @@ final class TouchDeviceManager {
         var coordinateUpdated = false
         var tipChanged = false
 
+        // 解析 Windows Touch Digitizer Contact Identifier (Usage Page 0x0D, Usage 0x51)
+        if page == Int(kHIDPage_Digitizer_Local) && usage == Int(kHIDUsage_Dig_ContactIdentifier_Local) {
+            state.currentContactID = Int(intVal)
+            deviceStates[id] = state
+            return
+        }
+
+        // 若當前封包隸屬於次要接觸點（已鎖定首指但 Contact ID 不符），忽略其座標更新，杜絕多指跳動
+        let isSecondaryContact: Bool = {
+            if let primary = state.activePrimaryContactID {
+                return state.currentContactID != primary
+            }
+            return false
+        }()
+
         if page == kHIDPage_GenericDesktop {
             if usage == kHIDUsage_GD_X {
-                state.rawX = Double(intVal)
-                state.pendingXUpdate = true
-                deviceStates[id] = state
+                if !isSecondaryContact {
+                    state.rawX = Double(intVal)
+                    state.pendingXUpdate = true
+                    deviceStates[id] = state
 
-                // 若只有 X 軸單獨更新（如純水平微移），於 Main 佇列下一拍確認並派發，杜絕競態衝突與重複派發
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    guard var curState = self.deviceStates[id], curState.pendingXUpdate else { return }
-                    curState.pendingXUpdate = false
-                    self.deviceStates[id] = curState
-                    self.processTouchInput(id: id, state: curState, tipChanged: false)
+                    // 若只有 X 軸單獨更新（如純水平微移），於 Main 佇列下一拍確認並派發，杜絕競態衝突與重複派發
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard var curState = self.deviceStates[id], curState.pendingXUpdate else { return }
+                        curState.pendingXUpdate = false
+                        self.deviceStates[id] = curState
+                        self.processTouchInput(id: id, state: curState, tipChanged: false)
+                    }
                 }
                 return
             } else if usage == kHIDUsage_GD_Y {
-                state.rawY = Double(intVal)
-                state.pendingXUpdate = false // Y 軸到達，直接合併 X 與 Y 立即觸發，杜絕拆包橫縱分離
-                coordinateUpdated = true
+                if !isSecondaryContact {
+                    state.rawY = Double(intVal)
+                    state.pendingXUpdate = false // Y 軸到達，直接合併 X 與 Y 立即觸發，杜絕拆包橫縱分離
+                    coordinateUpdated = true
+                }
             }
         } else if page == kHIDPage_Digitizer {
             if usage == kHIDUsage_Dig_TipSwitch {
                 state.hasTipSwitch = true
-                let newDown = (intVal > 0)
-                if newDown != state.isDown {
-                    state.isDown = newDown
-                    tipChanged = true
+                let isDownNow = (intVal > 0)
+
+                if isDownNow {
+                    // 首指落下：若目前無活躍主接觸點，鎖定當前 Contact ID
+                    if state.activePrimaryContactID == nil {
+                        state.activePrimaryContactID = state.currentContactID
+                        if !state.isDown {
+                            state.isDown = true
+                            tipChanged = true
+                        }
+                    } else if state.currentContactID == state.activePrimaryContactID {
+                        // 主接觸點維持按壓
+                        if !state.isDown {
+                            state.isDown = true
+                            tipChanged = true
+                        }
+                    }
+                    // 次要接觸點按壓忽略
+                } else {
+                    // 接觸點抬起：若為當前主接觸點，釋放鎖定
+                    if state.activePrimaryContactID == nil || state.currentContactID == state.activePrimaryContactID {
+                        state.activePrimaryContactID = nil
+                        if state.isDown {
+                            state.isDown = false
+                            tipChanged = true
+                        }
+                    }
                 }
             }
         } else if page == kHIDPage_Button {
@@ -481,11 +560,10 @@ final class TouchDeviceManager {
         }
     }
 
-    @MainActor
     private func processTouchInput(id: String, state: DeviceInputState, tipChanged: Bool) {
-        guard let touchDevice = self.devices[id] else { return }
+        guard let touchDevice = devices[id] else { return }
 
-        // 若 EventTap 尚未啟動（例如啟動後才取得 Accessibility 權限），動態補救建立
+        // 保障 EventTap 處於正常監聽狀態
         if self.eventTapPort == nil {
             self.setupEventTap()
         }
