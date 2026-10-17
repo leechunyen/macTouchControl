@@ -1,17 +1,12 @@
 # macTouchControl
 
-<p align="center">
-  A modern, lightweight macOS utility designed for external touchscreen monitors and digitizers.<br>
-  Eliminates cursor-jumping issues across extended displays, brings natural 2D tablet scrolling, Windows/iPad-style long-press right-clicks, and screen edge gestures to Mac.
-</p>
+A modern, lightweight macOS utility designed for external touchscreen monitors and digitizers. Eliminates cursor-jumping issues across extended displays, brings natural 2D tablet scrolling, Windows/iPad-style long-press right-clicks, and screen edge gestures to Mac.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Platform-macOS%2014.0%2B-blue.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/Language-Swift%205.9%20%2F%20SwiftUI-orange.svg" alt="Language">
-  <img src="https://img.shields.io/badge/Architecture-Universal%20(Apple%20Silicon%20%26%20Intel)-purple.svg" alt="Architecture">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License">
-  <a href="https://buymeacoffee.com/cylee99"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Donate-yellow.svg?logo=buy-me-a-coffee" alt="Buy Me A Coffee"></a>
-</p>
+[![Platform](https://img.shields.io/badge/Platform-macOS%2014.0%2B-blue.svg)](https://apple.com)
+[![Language](https://img.shields.io/badge/Language-Swift%205.9%20%2F%20SwiftUI-orange.svg)](https://swift.org)
+[![Architecture](https://img.shields.io/badge/Architecture-Universal%20(Apple%20Silicon%20%26%20Intel)-purple.svg)](https://apple.com)
+[![License](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Donate-yellow.svg?logo=buy-me-a-coffee)](https://buymeacoffee.com/cylee99)
 
 ---
 
@@ -45,7 +40,7 @@
 - **Menu Bar Resident**: Resides unobtrusively in your macOS status menu bar. Closing the settings window hides the Dock icon and keeps the app running quietly in the background.
 - **Full Spotlight / Launchpad Integration**: Re-opening the app from Spotlight, Launchpad, or Finder instantly brings back the preferences window.
 - **Auto-Start at Login**: Built-in `SMAppService` launch-at-login support.
-- **Bilingual Interface**: Full support for English (US) and Traditional Chinese (Taiwan).
+- **Bilingual Interface**: Full localization support for English (US) and Traditional Chinese (Taiwan).
 
 ---
 
@@ -59,9 +54,74 @@
 
 ---
 
-## 🚀 Building & Installation
+## 🚀 Installation & First Launch
+
+### Pre-built Binary Installation
+
+1. Download the latest `macTouchControl.zip` or `.dmg` from [GitHub Releases](https://github.com/leechunyen/macTouchControl/releases).
+2. Unpack the archive and drag `macTouchControl.app` into your `/Applications` folder.
+
+---
+
+### ⚠️ Opening the App (Bypassing macOS Gatekeeper)
+
+> [!IMPORTANT]
+> **Why does macOS display a warning or say the app is damaged?**
+> 
+> `macTouchControl` is a free, open-source utility developed independently. Because the developer has not enrolled in the paid Apple Developer Program ($99/year), this binary is **not notarized or signed with an Apple Developer ID certificate**.
+> 
+> As a result, macOS Gatekeeper automatically attaches a quarantine flag to the downloaded file and may present one of the following prompts upon opening:
+> - *“macTouchControl is damaged and can’t be opened. You should move it to the Trash.”*
+> - *“macTouchControl cannot be opened because Apple cannot check it for malicious software.”*
+> - *“macTouchControl cannot be opened because the developer cannot be verified.”*
+> 
+> **This is standard macOS security behavior for unsigned open-source applications. The software is completely safe and open-source.** Choose one of the two solutions below to open it:
+
+#### Method 1: Remove the Quarantine Flag via Terminal (Recommended & Fastest)
+
+If macOS reports that the app is "damaged" or refuses to launch it, open the macOS **Terminal** app, paste the following command, and press **Enter**:
+
+```bash
+xattr -cr /Applications/macTouchControl.app
+```
+
+> **What this command does**: `xattr -cr` recursively strips the `com.apple.quarantine` extended attribute that macOS attaches to internet-downloaded binaries. Once executed, `macTouchControl` will open normally when double-clicked.
+
+---
+
+#### Method 2: Open via macOS System Settings
+
+1. In Finder, navigate to `/Applications`.
+2. **Right-click (or Control-click)** on `macTouchControl.app` and choose **Open**.
+3. In the dialog that appears, click **Open**.
+4. If macOS still blocks launch, open **System Settings > Privacy & Security**.
+5. Scroll down to the **Security** section. You will see a notice stating:
+   > *“macTouchControl” was blocked from use because it is not from an identified developer.*
+6. Click **Open Anyway**, then enter your administrator password or authenticate with Touch ID to proceed.
+
+---
+
+### 🔑 Required System Permissions
+
+`macTouchControl` needs to capture raw USB/HID touchscreen reports and synthesize mouse cursor movements and scrolling. On initial launch, grant the following two permissions:
+
+1. **Accessibility**:
+   - Navigate to **System Settings > Privacy & Security > Accessibility** and toggle on `macTouchControl`.
+   - *Purpose: Used for cursor coordinate warping, left/right mouse click simulation, window title bar dragging, and 2D scroll injection.*
+2. **Input Monitoring**:
+   - Navigate to **System Settings > Privacy & Security > Input Monitoring** and toggle on `macTouchControl`.
+   - *Purpose: Used for reading raw IOHID touch events dispatched by external touchscreen digitizers.*
+
+> [!TIP]
+> **Updating the App**:
+> Because the binary is ad-hoc signed, replacing `/Applications/macTouchControl.app` with a newer version may cause macOS to invalidate existing permission grants.
+> If touchscreen input stops responding after an update, go to **System Settings > Privacy & Security**, toggle both **Accessibility** and **Input Monitoring** off and back on (or remove them with `-` and re-add them).
+
+---
 
 ### Building from Source (Xcode)
+
+If you prefer to build the application locally from source:
 
 1. Clone this repository:
    ```bash
@@ -76,7 +136,7 @@
 
 3. Select the **`macTouchControl`** scheme and choose **`My Mac`** as the run destination.
 4. Press **`Cmd + B`** to build or **`Cmd + R`** to run.
-5. On the first launch, grant **Accessibility** and **Input Monitoring** permissions when prompted in **System Settings > Privacy & Security**.
+5. Grant **Accessibility** and **Input Monitoring** permissions when prompted.
 
 ### Running the Test Suite
 
@@ -90,10 +150,10 @@ The project includes unit and integration tests using Swift Testing and XCTest:
 
 ## 📖 User Guide
 
-1. **Connect Your Touchscreen**: Connect your external touch monitor to your Mac via USB-C (DisplayPort Alt Mode + Touch) or HDMI + USB-A/C data cable.
+1. **Connect Your Touchscreen**: Connect your external touch monitor to your Mac via USB-C (DisplayPort Alt Mode + Touch data) or HDMI plus a USB-A/C data cable.
 2. **Assign the Display**:
    - Open `macTouchControl`.
-   - In the **Touch Panel & Display 1-to-1 Mapping** section, locate your detected touch panel.
+   - Under the **Touch Panel & Display 1-to-1 Mapping** section, locate your detected touch panel.
    - Click **Identify** to verify the monitor index, then select the target screen from the dropdown menu.
 3. **Configure Gestures**:
    - **Touchscreen 2D Scrolling**: Enable for iPad-style drag-to-scroll. Customize speed and natural scroll direction as desired.
@@ -106,17 +166,11 @@ The project includes unit and integration tests using Swift Testing and XCTest:
 
 ## ☕️ Support & Donation
 
-If you find `macTouchControl` useful and would like to support its ongoing development and maintenance, you can buy me a coffee!
+If you find `macTouchControl` useful and would like to support its ongoing development and maintenance, consider buying me a coffee!
 
-<p align="center">
-  <a href="https://buymeacoffee.com/cylee99" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 50px !important;width: 180px !important;" >
-  </a>
-</p>
-
-- **Buy Me a Coffee**: [https://buymeacoffee.com/cylee99](https://buymeacoffee.com/cylee99)
-
-Your support is greatly appreciated! ❤️
+<a href="https://buymeacoffee.com/cylee99" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 48px !important; width: 174px !important;" >
+</a>
 
 ---
 
